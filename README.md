@@ -39,7 +39,7 @@ A flexible and resilient Discord bot focused on playing online radio streams 24/
 
 1.  **Clone the Repository:**
     ```bash
-    git clone https://your-repository-url/discord-radio-bot-modular.git
+    git clone https://github.com/shizuo-x/Yuzu-radio.git
     cd discord-radio-bot-modular
     ```
     *(Replace `your-repository-url` with the actual URL of your Git repo)*

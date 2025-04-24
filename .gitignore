@@ -1,0 +1,34 @@
+# .gitignore AND .dockerignore
+
+# Environment variables
+.env
+
+# Runtime state
+state.json
+state.json.bak
+
+# Python cache/build artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+build/
+dist/
+*.egg-info/
+
+# Virtual environment folders
+env/
+venv/
+.venv/
+
+# IDE/Editor specific folders
+.vscode/
+.idea/
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Logs (if you create a log directory)
+logs/
+*.log

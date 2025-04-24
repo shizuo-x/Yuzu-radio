@@ -1,0 +1,11 @@
+# version: '3.8'
+services:
+  radio-bot:
+    build: .
+    container_name: discord-radio-bot-modular
+    restart: unless-stopped
+    env_file:
+      - .env
+    # Optional volume for logs if needed
+    # volumes:
+    #   - ./logs:/app/logs

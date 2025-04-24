@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc *.pyo *.pyd
+.Python
+env/ venv/
+.git/ .gitignore
+.env
+state.json # Don't include the state file in the image
+state.json.bak # Backup files if you create them
+Dockerfile
+docker-compose.yml
+*.md
+logs/ # If you use a logs volume/directory

@@ -91,7 +91,7 @@ class Utility(commands.Cog):
                 value=f"React with {config.STOP_REACTION} on the 'Now Playing' message to stop playback.",
                 inline=False
             )
-
+        
         # Fallback for invalid page number
         else:
              embed.title = f"{self.bot.user.name} Help (Invalid Page)"
@@ -105,9 +105,11 @@ class Utility(commands.Cog):
     async def help(self, ctx: commands.Context):
         """Shows the bot's help information, paginated."""
         is_interaction = ctx.interaction is not None
-        # Help should usually be ephemeral when invoked via slash command
-        ephemeral = is_interaction
-        if is_interaction: await ctx.defer(ephemeral=ephemeral) # Defer first
+        
+        # --- FIX: Set ephemeral to False for pagination to work ---
+        ephemeral = False # Pagination requires a public message
+        
+        if is_interaction: await ctx.defer(ephemeral=ephemeral) # Defer publicly
 
         # Determine the prefix to display in examples
         display_prefix = config.COMMAND_PREFIX # Default
@@ -165,13 +167,13 @@ class Utility(commands.Cog):
             except discord.NotFound: logger.warning(f"[{ctx.guild.id if ctx.guild else 'DM'}] Help message {message.id} deleted."); break
             except Exception as e: logger.exception(f"[{ctx.guild.id if ctx.guild else 'DM'}] Error during help pagination: {e}"); break
 
+
     # --- Paginated List Command (Unchanged) ---
     def create_list_page_embed(self, page_num: int, total_pages: int, stream_keys: list[str]) -> discord.Embed:
-        """Helper function to create an embed for a specific list page."""
         start_index = page_num * LIST_ITEMS_PER_PAGE
         end_index = start_index + LIST_ITEMS_PER_PAGE
         keys_on_page = stream_keys[start_index:end_index]
-        display_prefix = config.COMMAND_PREFIX # Keep simple for list example
+        display_prefix = config.COMMAND_PREFIX
 
         embed = discord.Embed(
             title="📻 Predefined Radio Streams",
@@ -192,7 +194,6 @@ class Utility(commands.Cog):
 
     @commands.hybrid_command(name="list", description="Shows the list of predefined radio streams.")
     async def list(self, ctx: commands.Context):
-        """Shows the list of predefined radio streams, paginated."""
         is_interaction = ctx.interaction is not None
         ephemeral = False
         if is_interaction: await ctx.defer(ephemeral=ephemeral)
@@ -236,7 +237,7 @@ class Utility(commands.Cog):
                 try:
                     await message.clear_reactions()
                     timeout_embed = message.embeds[0]; timeout_embed.set_footer(text=f"Page {current_page + 1}/{total_pages} (Pagination timed out)"); await message.edit(embed=timeout_embed)
-                except: pass # Ignore cleanup errors
+                except: pass
                 break
             except discord.NotFound: logger.warning(f"[{ctx.guild.id if ctx.guild else 'DM'}] List message {message.id} deleted."); break
             except Exception as e: logger.exception(f"[{ctx.guild.id if ctx.guild else 'DM'}] Error during list pagination: {e}"); break

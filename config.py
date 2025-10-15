@@ -9,16 +9,19 @@ load_dotenv()
 
 # --- Bot Configuration ---
 BOT_TOKEN = os.getenv('DISCORD_TOKEN')
-COMMAND_PREFIX = ",," # This is now the DEFAULT prefix
-PREFIXES_FILE = 'prefixes.json' # <--- ADDED: File for custom prefixes
+COMMAND_PREFIX = ",,"
 RECONNECT_DELAY = 5
 MAX_RECONNECT_ATTEMPTS = 3
 STOP_REACTION = '⏹️'
 STATE_FILE = 'state.json'
 METADATA_FETCH_INTERVAL = 30
 
+# --- Translation Configuration ---
+# Read from .env, with a public fallback instance
+LIBRETRANSLATE_API_URL = os.getenv('LIBRETRANSLATE_API_URL', 'https://translate.argosopentech.com')
+TRANSLATIONS_DB_FILE = 'translations.db' # SQLite database file
+
 # --- Predefined Radio Streams ---
-# Format: "Display Name": {"url": "stream_url", "desc": "Short description"}
 PREDEFINED_STREAMS = {
     "name1": {
         "url": "link to station",
@@ -31,7 +34,7 @@ LOG_LEVEL = logging.INFO
 
 # --- Intents ---
 INTENTS = discord.Intents.default()
-INTENTS.message_content = True # Required for prefix commands
+INTENTS.message_content = True
 INTENTS.voice_states = True
 INTENTS.guilds = True
 INTENTS.reactions = True

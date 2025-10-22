@@ -17,9 +17,11 @@ STATE_FILE = 'state.json'
 METADATA_FETCH_INTERVAL = 30
 
 # --- Translation Configuration ---
-# Read from .env, with a public fallback instance
 LIBRETRANSLATE_API_URL = os.getenv('LIBRETRANSLATE_API_URL', 'https://translate.argosopentech.com')
-TRANSLATIONS_DB_FILE = 'translations.db' # SQLite database file
+TRANSLATIONS_DB_FILE = 'translations.db'
+
+# --- Confessions Configuration ---
+CONFESSIONS_DB_FILE = 'confessions.db'
 
 # --- Predefined Radio Streams ---
 PREDEFINED_STREAMS = {
@@ -33,11 +35,18 @@ PREDEFINED_STREAMS = {
 LOG_LEVEL = logging.INFO
 
 # --- Intents ---
-INTENTS = discord.Intents.default()
-INTENTS.message_content = True
-INTENTS.voice_states = True
-INTENTS.guilds = True
-INTENTS.reactions = True
+# --- FIX: Use discord.Intents.all() to enable all privileged intents ---
+# This ensures that if they are enabled in the Dev Portal, the bot will use them.
+INTENTS = discord.Intents.all()
+# If you want to be more specific instead of .all():
+# INTENTS = discord.Intents.default()
+# INTENTS.message_content = True # Required for prefix commands
+# INTENTS.voice_states = True
+# INTENTS.guilds = True
+# INTENTS.reactions = True
+# INTENTS.members = True # Explicitly enable the members intent
+# INTENTS.presences = True # Often useful with the members intent
+
 
 # --- Permissions ---
 PERMISSIONS = discord.Permissions()

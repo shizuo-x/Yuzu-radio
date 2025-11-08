@@ -7,24 +7,33 @@ import logging
 
 load_dotenv()
 
+# --- Data Path ---
+# All persistent data files (databases, json state) will be stored here.
+# This is crucial for data to survive Docker container restarts.
+DATA_DIR = "data"
+# This line ensures the 'data' directory exists when the bot starts.
+os.makedirs(DATA_DIR, exist_ok=True)
+
 # --- Bot Configuration ---
 BOT_TOKEN = os.getenv('DISCORD_TOKEN')
 COMMAND_PREFIX = ",,"
 RECONNECT_DELAY = 5
 MAX_RECONNECT_ATTEMPTS = 3
 STOP_REACTION = '⏹️'
-STATE_FILE = 'state.json'
 METADATA_FETCH_INTERVAL = 30
+# --- Updated file paths to use the data directory ---
+STATE_FILE = os.path.join(DATA_DIR, 'state.json')
+PREFIXES_FILE = os.path.join(DATA_DIR, 'prefixes.json')
 
 # --- Translation Configuration ---
 LIBRETRANSLATE_API_URL = os.getenv('LIBRETRANSLATE_API_URL', 'https://translate.argosopentech.com')
-TRANSLATIONS_DB_FILE = 'translations.db'
+TRANSLATIONS_DB_FILE = os.path.join(DATA_DIR, 'translations.db')
 
 # --- Confessions Configuration ---
-CONFESSIONS_DB_FILE = 'confessions.db'
+CONFESSIONS_DB_FILE = os.path.join(DATA_DIR, 'confessions.db')
 
 # --- Reminders Configuration ---
-REMINDERS_DB_FILE = 'reminders.db'
+REMINDERS_DB_FILE = os.path.join(DATA_DIR, 'reminders.db')
 REMINDER_CHECK_INTERVAL = 20.0
 
 # --- AI Assistant Configuration ---
@@ -50,6 +59,7 @@ LOG_LEVEL = logging.INFO
 
 # --- Intents ---
 INTENTS = discord.Intents.all()
+
 
 # --- Permissions ---
 PERMISSIONS = discord.Permissions()

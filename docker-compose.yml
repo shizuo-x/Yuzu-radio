@@ -1,8 +1,8 @@
 # version: '3.8'
 services:
-  radio-bot:
+  yuzu:
     build: .
-    container_name: discord-radio-bot-modular
+    container_name: yuzu-discord-bot
     restart: unless-stopped
     env_file:
       - .env

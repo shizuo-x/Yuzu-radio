@@ -23,7 +23,7 @@ class Utility(commands.Cog):
     async def ping(self, ctx: commands.Context):
         await ctx.send(f"Pong! Latency: {self.bot.latency * 1000:.2f} ms", ephemeral=True)
 
-    # --- COMPLETE HELP COMMAND OVERHAUL ---
+    # --- FULLY REVISED HELP COMMAND ---
 
     def get_help_page_content(self, page_num: int, total_pages: int, prefix: str) -> discord.Embed:
         """Creates the rich embed for a specific help page with detailed descriptions."""
@@ -32,115 +32,81 @@ class Utility(commands.Cog):
             embed.set_thumbnail(url=self.bot.user.display_avatar.url)
         except:
             pass
+        
+        # Determine the bot's name to use in examples
+        bot_name = self.bot.user.name if self.bot.user else "Yuzu"
 
         # Page 1: Introduction & Radio
         if page_num == 0:
-            embed.title = "🎧 Yuzu Help: Radio & Playback"
-            embed.description = (
-                f"Welcome! I'm a multi-purpose bot with a focus on 24/7 radio, translation, and more.\n\n"
-                f"**Your prefix in this context is `{prefix}`.** You can also use Slash Commands (`/`)."
-            )
-            embed.add_field(
-                name="📻 Radio Commands",
-                value=(
-                    f"**`/play`** / `{prefix}play <Name>`\n"
-                    f"› Starts playing a radio station. Use a predefined name from the list or a direct URL.\n\n"
-                    f"**`/stop`** / `{prefix}stop`\n"
-                    f"› Stops the music and clears the player.\n\n"
-                    f"**`/leave`** / `{prefix}dc`\n"
-                    f"› Disconnects the bot from the voice channel.\n\n"
-                    f"**`/now`** / `{prefix}now`\n"
-                    f"› Shows the 'Now Playing' info again, including song metadata if available."
-                ),
-                inline=False
-            )
+            embed.title = f"🎧 {bot_name} Help: Radio & Playback"
+            embed.description = (f"Welcome! I'm a multi-purpose bot with a focus on 24/7 radio and more.\n\n"
+                                 f"**Your prefix is `{prefix}`.** You can also use Slash Commands (`/`).")
+            embed.add_field(name="📻 Radio Commands", value=(
+                f"**`/play`** / `{prefix}play <Name>`\n› Starts playing a radio station from the list or a URL.\n\n"
+                f"**`/stop`** / `{prefix}stop`\n› Stops the music and clears the player.\n\n"
+                f"**`/leave`** / `{prefix}dc`\n› Disconnects the bot from the voice channel.\n\n"
+                f"**`/now`** / `{prefix}now`\n› Shows the 'Now Playing' info again."), inline=False)
+            embed.add_field(name="▶️ Playback Control", value=f"React with {config.STOP_REACTION} on the 'Now Playing' message to stop playback.", inline=False)
 
-        # Page 2: Translation
+        # Page 2: AI Assistant
         elif page_num == 1:
-            embed.title = "🌐 Yuzu Help: Translation"
-            embed.description = "Translate messages automatically between channels, servers, or to your DMs."
-            embed.add_field(
-                name="Subscription Commands (Slash Only)",
-                value=(
-                    "**`/translate_subscribe to_channel`**\n"
-                    "› Translates messages *from* a `source_channel_id` *to* a `destination_channel_id`. Requires 'Manage Server' permission in the destination server.\n\n"
-                    "**`/translate_subscribe to_dm`**\n"
-                    "› Translates messages from a `source_channel_id` directly to your DMs.\n\n"
-                    "**Optional Arguments for Subscribing:**\n"
-                    "• `target_language`: Set the language to translate to (e.g., `es`, `ja`). Defaults to `en`.\n"
-                    "• `force_source_language`: Force the bot to assume the source is a specific language (e.g., `tl` for Tagalog)."
-                ),
-                inline=False
-            )
-            embed.add_field(
-                name="Management",
-                value=(
-                    "**`/translate_list`**\n"
-                    "› Privately lists all of your active translation subscriptions and their IDs.\n\n"
-                    "**`/translate_unsubscribe`**\n"
-                    "› Deletes subscriptions. You can provide one ID, a comma-separated list (`5,8`), or `all`."
-                ),
-                inline=False
-            )
+            embed.title = f"🤖 {bot_name} Help: AI Assistant"
+            embed.description = f"You can talk to me directly by mentioning me at the start of your message!"
+            embed.add_field(name="How to Use", value=(
+                "Simply ping me and ask a question. I can remember the last few messages in our conversation within a channel, so you can ask follow-up questions!\n\n"
+                f"**Example:** `@{bot_name} Hello, how are you today?`\n"
+                f"**Example:** `@{bot_name} Can you tell me a fun fact about space?`"
+            ), inline=False)
+            embed.add_field(name="⚠️ Privacy Note", value="To provide conversational context, message content is sent to the Google Gemini API.", inline=False)
 
-        # Page 3: Confessions
+        # Page 3: Reminders
         elif page_num == 2:
-            embed.title = "💌 Yuzu Help: Anonymous Confessions"
-            embed.description = "Send and receive anonymous direct messages with other users who share a server with the bot."
-            embed.add_field(
-                name="Sending & Receiving",
-                value=(
-                    "**`/confess <user> <message>`**\n"
-                    "› Sends a private, anonymous message to a user. For `<user>`, you can use their User ID, @Mention, or unique username.\n\n"
-                    "**Replying & Blocking**\n"
-                    "› When you receive a confession, it will have buttons to `Reply`, `Block Sender`, or `Stop All Confessions`."
-                ),
-                inline=False
-            )
-            embed.add_field(
-                name="Managing Your Privacy",
-                value=(
-                    "**`/confessions activate`**\n"
-                    "› Allows you to start receiving confessions.\n\n"
-                    "**`/confessions deactivate`**\n"
-                    "› Stops you from receiving any new confessions.\n\n"
-                    "**`/confessions unblock_all`**\n"
-                    "› Removes all blocks you have placed on anonymous senders."
-                ),
-                inline=False
-            )
+            embed.title = f"⏰ {bot_name} Help: Reminders"
+            embed.description = "Set personal or channel-wide reminders. All commands are Slash Commands only for the best user experience."
+            embed.add_field(name="User Commands", value=(
+                "**`/remind <message> <time> <date> [options]`**\n"
+                "› Sets a reminder. You can specify a timezone, and set it to repeat at a certain interval in minutes.\n\n"
+                "**`/reminders list`**\n"
+                "› Privately lists all your upcoming reminders and their IDs.\n\n"
+                "**`/reminders delete <id>`**\n"
+                "› Deletes one of your reminders by its ID."
+            ), inline=False)
+            embed.add_field(name="Admin Setup", value=(
+                "**`/reminders_admin set_role <role>`**\n"
+                "› (Admin Only) Sets a role that can use `/remind` anywhere.\n\n"
+                "**`/reminders_admin set_channel <channel>`**\n"
+                "› (Admin Only) Sets a channel where anyone can use `/remind`."
+            ), inline=False)
             
-        # Page 4: Utilities & Admin (MODIFIED)
+        # Page 4: Translation
         elif page_num == 3:
-            embed.title = "🛠️ Yuzu Help: Utilities & Admin"
-            embed.add_field(
-                name="General Utilities",
-                value=(
-                    # --- ADDED /say command here ---
-                    "**`/say <message>`**\n"
-                    "› Makes the bot send the given message in the current channel. All pings are disabled for safety.\n\n"
-                    # --- Existing commands below ---
-                    f"**`/list`** / `{prefix}list`\n"
-                    f"› Shows a paginated list of all predefined radio stations.\n\n"
-                    f"**`/convert <link> <name>`**\n"
-                    f"› Converts a GIF from a URL into a high-quality server emoji (requires 'Manage Expressions' permission).\n\n"
-                    f"**`/ping`**\n"
-                    f"› Checks the bot's responsiveness."
-                ),
-                inline=False
-            )
-            embed.add_field(
-                name="⚙️ Admin Commands",
-                value=(
-                    f"**`/setprefix <prefix>`** / `{prefix}setprefix <prefix>`\n"
-                    f"› (Admin Only) Changes the command prefix for this server. Use `reset` to go back to default."
-                ),
-                inline=False
-            )
+            embed.title = f"🌐 {bot_name} Help: Translation"
+            embed.description = "Translate messages automatically between channels, servers, or to your DMs."
+            embed.add_field(name="Subscription Commands (Slash Only)", value=(
+                "**`/translate_subscribe to_channel`**\n› Translates from a `source_channel_id` to a `destination_channel_id`.\n\n"
+                "**`/translate_subscribe to_dm`**\n› Translates from a `source_channel_id` to your DMs.\n\n"
+                "**Optional Arguments:** `target_language`, `force_source_language`."), inline=False)
+            embed.add_field(name="Management", value=("**`/translate_list`**\n› Privately lists your subscriptions.\n\n" "**`/translate_unsubscribe`**\n› Deletes subscriptions by ID (e.g., `5`, `5,8`, or `all`)."), inline=False)
 
-        # This page was showing "Playback Control", but let's remove it to keep the page count at 4
-        # and because it's mentioned with the stop command implicitly.
-        # This makes the help menu cleaner.
+        # Page 5: Confessions
+        elif page_num == 4:
+            embed.title = f"💌 {bot_name} Help: Anonymous Confessions"
+            embed.description = "Send and receive anonymous direct messages."
+            embed.add_field(name="Commands", value=(
+                "**`/confess <user> <message>`**\n› Sends a private, anonymous message to a user.\n\n"
+                "**`/confessions activate` / `deactivate`**\n› Toggles your ability to receive confessions.\n\n"
+                "**`/confessions unblock_all`**\n› Removes all blocks you have placed."), inline=False)
+
+        # Page 6: Utilities & Admin
+        elif page_num == 5:
+            embed.title = f"🛠️ {bot_name} Help: Utilities & Admin"
+            embed.add_field(name="General Utilities", value=(
+                f"**`/say <message>`**\n› Makes the bot send a message. Pings are disabled.\n\n"
+                f"**`/list`** / `{prefix}list`\n› Shows the list of predefined radio stations.\n\n"
+                f"**`/convert <link> <name>`**\n› Converts a GIF into a server emoji.\n\n"
+                f"**`/ping`**\n› Checks the bot's responsiveness."), inline=False)
+            embed.add_field(name="⚙️ Admin Commands", value=(
+                f"**`/setprefix <prefix>`** / `{prefix}setprefix <prefix>`\n› (Admin Only) Changes the prefix for this server."), inline=False)
 
         embed.set_footer(text=f"Page {page_num + 1}/{total_pages} • Use the arrows to navigate.")
         return embed
@@ -154,25 +120,21 @@ class Utility(commands.Cog):
         if ctx.guild:
             display_prefix = self.bot.guild_prefixes.get(str(ctx.guild.id), config.COMMAND_PREFIX)
 
-        # --- Adjusted total pages back to 4 ---
-        total_pages = 4
+        # --- UPDATE TOTAL PAGES ---
+        total_pages = 6
         current_page = 0
         initial_embed = self.get_help_page_content(current_page, total_pages, display_prefix)
         
         message = await ctx.send(embed=initial_embed)
         if not message and is_interaction:
-            try:
-                message = await ctx.interaction.original_response()
-            except discord.NotFound:
-                logger.error(f"Failed to get original response for help in {ctx.guild.id if ctx.guild else 'DM'}")
-                await ctx.send("Error: Could not start pagination.", ephemeral=True); return
+            try: message = await ctx.interaction.original_response()
+            except discord.NotFound: logger.error(f"Failed to get original response for help in guild {ctx.guild.id if ctx.guild else 'DM'}"); return
 
         if total_pages <= 1 or not message: return
         try:
             await message.add_reaction("◀️")
             await message.add_reaction("▶️")
-        except discord.Forbidden:
-            logger.warning(f"Missing 'Add Reactions' for help in {ctx.guild.id if ctx.guild else 'DM'}."); return
+        except discord.Forbidden: logger.warning(f"Missing 'Add Reactions' for help in guild {ctx.guild.id if ctx.guild else 'DM'}."); return
         
         def check(reaction, user):
             return user.id == ctx.author.id and reaction.message.id == message.id and str(reaction.emoji) in ["◀️", "▶️"]
@@ -180,7 +142,6 @@ class Utility(commands.Cog):
         while True:
             try:
                 reaction, user = await self.bot.wait_for("reaction_add", timeout=HELP_TIMEOUT, check=check)
-
                 valid_move = False
                 if str(reaction.emoji) == "▶️" and current_page < total_pages - 1:
                     current_page += 1; valid_move = True
@@ -205,7 +166,7 @@ class Utility(commands.Cog):
             except Exception as e:
                 logger.exception(f"Error during help pagination: {e}"); break
     
-    # (The `list` command and its helper remain unchanged and are correct)
+    # (The `list` command and its helper are unchanged)
     def create_list_page_embed(self, page_num, total_pages, stream_keys):
         start_index = page_num * LIST_ITEMS_PER_PAGE; end_index = start_index + LIST_ITEMS_PER_PAGE
         keys_on_page = stream_keys[start_index:end_index]; display_prefix = config.COMMAND_PREFIX

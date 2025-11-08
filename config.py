@@ -23,6 +23,20 @@ TRANSLATIONS_DB_FILE = 'translations.db'
 # --- Confessions Configuration ---
 CONFESSIONS_DB_FILE = 'confessions.db'
 
+# --- Reminders Configuration ---
+REMINDERS_DB_FILE = 'reminders.db'
+REMINDER_CHECK_INTERVAL = 20.0
+
+# --- AI Assistant Configuration ---
+AI_PROVIDER = os.getenv('AI_PROVIDER', 'gemini').lower() # Default to gemini if not set
+# Gemini settings
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'models/gemini-1.5-flash-latest')
+# DeepSeek settings
+DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
+DEEPSEEK_MODEL = os.getenv('DEEPSEEK_MODEL', 'deepseek-chat')
+DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
+
 # --- Predefined Radio Streams ---
 PREDEFINED_STREAMS = {
     "name1": {
@@ -35,18 +49,7 @@ PREDEFINED_STREAMS = {
 LOG_LEVEL = logging.INFO
 
 # --- Intents ---
-# --- FIX: Use discord.Intents.all() to enable all privileged intents ---
-# This ensures that if they are enabled in the Dev Portal, the bot will use them.
 INTENTS = discord.Intents.all()
-# If you want to be more specific instead of .all():
-# INTENTS = discord.Intents.default()
-# INTENTS.message_content = True # Required for prefix commands
-# INTENTS.voice_states = True
-# INTENTS.guilds = True
-# INTENTS.reactions = True
-# INTENTS.members = True # Explicitly enable the members intent
-# INTENTS.presences = True # Often useful with the members intent
-
 
 # --- Permissions ---
 PERMISSIONS = discord.Permissions()

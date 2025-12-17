@@ -11,6 +11,7 @@ from typing import Dict, Any, List, Union
 
 # Import configuration and constants
 import config
+from core.stations import StationManager
 
 logger = logging.getLogger('discord_bot.core')
 
@@ -59,6 +60,7 @@ class RadioBot(commands.Bot):
         self.loaded_state = False
         self.loaded_prefixes = False # Flag for prefix loading
 
+        self.station_manager = StationManager(self)
         self.load_prefixes() # Load prefixes during initialization
 
     async def setup_hook(self):
@@ -67,6 +69,9 @@ class RadioBot(commands.Bot):
         if self.http_session is None or self.http_session.closed:
             self.http_session = aiohttp.ClientSession()
             logger.info("Created global aiohttp ClientSession.")
+
+        # --- Load Stations ---
+        await self.station_manager.fetch_stations()
 
         # --- Load Cogs ---
         cogs_dir = "cogs"

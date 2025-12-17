@@ -39,74 +39,72 @@ class Utility(commands.Cog):
         # Page 1: Introduction & Radio
         if page_num == 0:
             embed.title = f"🎧 {bot_name} Help: Radio & Playback"
-            embed.description = (f"Welcome! I'm a multi-purpose bot with a focus on 24/7 radio and more.\n\n"
-                                 f"**Your prefix is `{prefix}`.** You can also use Slash Commands (`/`).")
+            embed.description = (f"Hi! I'm {bot_name}, your 24/7 radio companion.\n\n"
+                                 f"**Prefix:** `{prefix}` or use Slash Commands (`/`).")
             embed.add_field(name="📻 Radio Commands", value=(
-                f"**`/play`** / `{prefix}play <Name>`\n› Starts playing a radio station from the list or a URL.\n\n"
-                f"**`/stop`** / `{prefix}stop`\n› Stops the music and clears the player.\n\n"
-                f"**`/leave`** / `{prefix}dc`\n› Disconnects the bot from the voice channel.\n\n"
-                f"**`/now`** / `{prefix}now`\n› Shows the 'Now Playing' info again."), inline=False)
-            embed.add_field(name="▶️ Playback Control", value=f"React with {config.STOP_REACTION} on the 'Now Playing' message to stop playback.", inline=False)
+                f"**`/list`** / `{prefix}list`\n› **Browse available radio stations.**\n\n"
+                f"**`/play <query>`** / `{prefix}play <query>`\n› Play a station by **Name** or **Number**.\n› *Example:* `/play 1` or `/play lofi`\n\n"
+                f"**`/now`** / `{prefix}now`\n› See what's currently playing.\n\n"
+                f"**`/stop`** / `{prefix}stop`\n› Stop playback.\n\n"
+                f"**`/leave`** / `{prefix}dc`\n› Disconnect me from the voice channel."), inline=False)
+            embed.add_field(name="▶️ Controls", value=f"React with {config.STOP_REACTION} on the player message to stop playback.", inline=False)
 
         # Page 2: AI Assistant
         elif page_num == 1:
             embed.title = f"🤖 {bot_name} Help: AI Assistant"
-            embed.description = f"You can talk to me directly by mentioning me at the start of your message!"
+            embed.description = f"Chat with me directly! Just mention me (`@Bot`) to start a conversation."
             embed.add_field(name="How to Use", value=(
-                "Simply ping me and ask a question. I can remember the last few messages in our conversation within a channel, so you can ask follow-up questions!\n\n"
-                f"**Example:** `@{bot_name} Hello, how are you today?`\n"
-                f"**Example:** `@{bot_name} Can you tell me a fun fact about space?`"
+                "I remember the last few messages, so you can ask follow-up questions!\n\n"
+                f"**Example:** `@{bot_name} What is the capital of France?`\n"
+                f"**Example:** `@{bot_name} Tell me a joke!`"
             ), inline=False)
-            embed.add_field(name="⚠️ Privacy Note", value="To provide conversational context, message content is sent to the Google Gemini API.", inline=False)
+            embed.add_field(name="⚠️ Privacy", value="Messages mentioned to me are sent to the AI provider (Google Gemini) for processing.", inline=False)
 
         # Page 3: Reminders
         elif page_num == 2:
             embed.title = f"⏰ {bot_name} Help: Reminders"
-            embed.description = "Set personal or channel-wide reminders. All commands are Slash Commands only for the best user experience."
-            embed.add_field(name="User Commands", value=(
-                "**`/remind <message> <time> <date> [options]`**\n"
-                "› Sets a reminder. You can specify a timezone, and set it to repeat at a certain interval in minutes.\n\n"
+            embed.description = "Never forget a thing! Set personal or server-wide reminders."
+            embed.add_field(name="User Commands (Slash Only)", value=(
+                "**`/remind <message> <time> <date> ...`**\n"
+                "› Set a new reminder. Supports timezones and recurring options.\n\n"
                 "**`/reminders list`**\n"
-                "› Privately lists all your upcoming reminders and their IDs.\n\n"
+                "› View your upcoming reminders.\n\n"
                 "**`/reminders delete <id>`**\n"
-                "› Deletes one of your reminders by its ID."
+                "› Delete a reminder by its ID."
             ), inline=False)
-            embed.add_field(name="Admin Setup", value=(
-                "**`/reminders_admin set_role <role>`**\n"
-                "› (Admin Only) Sets a role that can use `/remind` anywhere.\n\n"
-                "**`/reminders_admin set_channel <channel>`**\n"
-                "› (Admin Only) Sets a channel where anyone can use `/remind`."
+            embed.add_field(name="Admin Config", value=(
+                "**`/reminders_admin set_role`** & **`set_channel`**\n"
+                "› Configure who can set reminders and where."
             ), inline=False)
             
         # Page 4: Translation
         elif page_num == 3:
             embed.title = f"🌐 {bot_name} Help: Translation"
-            embed.description = "Translate messages automatically between channels, servers, or to your DMs."
-            embed.add_field(name="Subscription Commands (Slash Only)", value=(
-                "**`/translate_subscribe to_channel`**\n› Translates from a `source_channel_id` to a `destination_channel_id`.\n\n"
-                "**`/translate_subscribe to_dm`**\n› Translates from a `source_channel_id` to your DMs.\n\n"
-                "**Optional Arguments:** `target_language`, `force_source_language`."), inline=False)
-            embed.add_field(name="Management", value=("**`/translate_list`**\n› Privately lists your subscriptions.\n\n" "**`/translate_unsubscribe`**\n› Deletes subscriptions by ID (e.g., `5`, `5,8`, or `all`)."), inline=False)
+            embed.description = "Break language barriers with automatic translation."
+            embed.add_field(name="Setup (Slash Only)", value=(
+                "**`/translate_subscribe to_channel`**\n› Automatically translate messages from one channel to another.\n\n"
+                "**`/translate_subscribe to_dm`**\n› Receive translations in your DMs."
+                ), inline=False)
+            embed.add_field(name="Management", value=("**`/translate_list`**\n› View your active translation subscriptions.\n\n" "**`/translate_unsubscribe`**\n› Stop specific translations."), inline=False)
 
         # Page 5: Confessions
         elif page_num == 4:
-            embed.title = f"💌 {bot_name} Help: Anonymous Confessions"
-            embed.description = "Send and receive anonymous direct messages."
+            embed.title = f"💌 {bot_name} Help: Confessions"
+            embed.description = "Send anonymous messages safely."
             embed.add_field(name="Commands", value=(
-                "**`/confess <user> <message>`**\n› Sends a private, anonymous message to a user.\n\n"
-                "**`/confessions activate` / `deactivate`**\n› Toggles your ability to receive confessions.\n\n"
-                "**`/confessions unblock_all`**\n› Removes all blocks you have placed."), inline=False)
+                "**`/confess <user> <message>`**\n› Send an anonymous DM to a user.\n\n"
+                "**`/confessions activate` / `deactivate`**\n› Choose whether you want to receive confessions.\n\n"
+                "**`/confessions unblock_all`**\n› Unblock previously blocked senders."), inline=False)
 
         # Page 6: Utilities & Admin
         elif page_num == 5:
-            embed.title = f"🛠️ {bot_name} Help: Utilities & Admin"
-            embed.add_field(name="General Utilities", value=(
-                f"**`/say <message>`**\n› Makes the bot send a message. Pings are disabled.\n\n"
-                f"**`/list`** / `{prefix}list`\n› Shows the list of predefined radio stations.\n\n"
-                f"**`/convert <link> <name>`**\n› Converts a GIF into a server emoji.\n\n"
-                f"**`/ping`**\n› Checks the bot's responsiveness."), inline=False)
-            embed.add_field(name="⚙️ Admin Commands", value=(
-                f"**`/setprefix <prefix>`** / `{prefix}setprefix <prefix>`\n› (Admin Only) Changes the prefix for this server."), inline=False)
+            embed.title = f"🛠️ {bot_name} Help: Utilities"
+            embed.add_field(name="Tools", value=(
+                f"**`/say <message>`**\n› Make me say something (Pings disabled).\n\n"
+                f"**`/convert <link> <name>`**\n› Create a server emoji from a GIF or image link.\n\n"
+                f"**`/ping`**\n› Check my connection speed."), inline=False)
+            embed.add_field(name="⚙️ Admin", value=(
+                f"**`/setprefix <prefix>`** / `{prefix}setprefix`\n› Change my command prefix for this server."), inline=False)
 
         embed.set_footer(text=f"Page {page_num + 1}/{total_pages} • Use the arrows to navigate.")
         return embed
@@ -166,26 +164,36 @@ class Utility(commands.Cog):
             except Exception as e:
                 logger.exception(f"Error during help pagination: {e}"); break
     
-    # (The `list` command and its helper are unchanged)
     def create_list_page_embed(self, page_num, total_pages, stream_keys):
         start_index = page_num * LIST_ITEMS_PER_PAGE; end_index = start_index + LIST_ITEMS_PER_PAGE
         keys_on_page = stream_keys[start_index:end_index]; display_prefix = config.COMMAND_PREFIX
-        embed = discord.Embed(title="📻 Predefined Radio Streams", description=f"Use `{display_prefix}play <Name>` or `/play stream:<Name>`:", color=discord.Color.orange())
+        
+        # User doesn't need to know the source (JSON vs PocketBase)
+        embed = discord.Embed(title="📻 Radio Stations", description=f"Use `{display_prefix}play <ID>` or `{display_prefix}play <Name>`.\nYou can also search by partial name.", color=discord.Color.orange())
+        
         if not keys_on_page: embed.add_field(name="Streams", value="*No streams on this page.*", inline=False)
         else:
             list_content = ""
             for i, key in enumerate(keys_on_page, start=start_index):
-                stream_data = config.PREDEFINED_STREAMS.get(key, {}); description = stream_data.get("desc", "No description")
-                list_content += f"**{i+1}.** `{key}` - *{description}*\n"
+                stream_data = self.bot.station_manager.get_station(key)
+                if not stream_data: continue
+                description = stream_data.get("desc", "No description")
+                # Clean up description presentation if needed
+                list_content += f"**{i+1}.** `{key}`\n└ *{description}*\n"
             if len(list_content) > 1024: list_content = list_content[:1020] + "\n..."
             embed.add_field(name="Available Streams", value=list_content, inline=False)
         embed.set_footer(text=f"Page {page_num + 1}/{total_pages}"); return embed
 
-    @commands.hybrid_command(name="list", description="Shows the list of predefined radio streams.")
+    @commands.hybrid_command(name="list", description="Browses the list of available radio stations.")
     async def list(self, ctx: commands.Context):
         is_interaction = ctx.interaction is not None
         if is_interaction: await ctx.defer(ephemeral=False)
-        stream_keys = list(config.PREDEFINED_STREAMS.keys())
+        
+        # Refresh stations if using PocketBase to get latest updates
+        if config.POCKETBASE_URL:
+            await self.bot.station_manager.fetch_stations()
+            
+        stream_keys = list(self.bot.station_manager.stations.keys())
         if not stream_keys: await ctx.send("No streams configured.", ephemeral=True); return
         total_pages = math.ceil(len(stream_keys) / LIST_ITEMS_PER_PAGE); current_page = 0
         initial_embed = self.create_list_page_embed(current_page, total_pages, stream_keys)

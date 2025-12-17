@@ -46,13 +46,9 @@ DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
 DEEPSEEK_MODEL = os.getenv('DEEPSEEK_MODEL', 'deepseek-chat')
 DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
 
-# --- Predefined Radio Streams ---
-PREDEFINED_STREAMS = {
-    "name1": {
-        "url": "link to station",
-        "desc": "short description"
-    },
-}
+# --- Radio Station Configuration ---
+POCKETBASE_URL = os.getenv('POCKETBASE_URL')
+STATIONS_FILE = os.path.join(os.path.dirname(__file__), 'stations.json')
 
 # --- Logging ---
 LOG_LEVEL = logging.INFO

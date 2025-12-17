@@ -7,34 +7,55 @@ import logging
 
 load_dotenv()
 
+# --- Data Path ---
+# All persistent data files (databases, json state) will be stored here.
+# This is crucial for data to survive Docker container restarts.
+DATA_DIR = "data"
+# This line ensures the 'data' directory exists when the bot starts.
+os.makedirs(DATA_DIR, exist_ok=True)
+
 # --- Bot Configuration ---
 BOT_TOKEN = os.getenv('DISCORD_TOKEN')
-COMMAND_PREFIX = ",," # This is now the DEFAULT prefix
-PREFIXES_FILE = 'prefixes.json' # <--- ADDED: File for custom prefixes
+COMMAND_PREFIX = ",,"
 RECONNECT_DELAY = 5
 MAX_RECONNECT_ATTEMPTS = 3
 STOP_REACTION = '⏹️'
-STATE_FILE = 'state.json'
 METADATA_FETCH_INTERVAL = 30
+# --- Updated file paths to use the data directory ---
+STATE_FILE = os.path.join(DATA_DIR, 'state.json')
+PREFIXES_FILE = os.path.join(DATA_DIR, 'prefixes.json')
 
-# --- Predefined Radio Streams ---
-# Format: "Display Name": {"url": "stream_url", "desc": "Short description"}
-PREDEFINED_STREAMS = {
-    "name1": {
-        "url": "link to station",
-        "desc": "short description"
-    },
-}
+# --- Translation Configuration ---
+LIBRETRANSLATE_API_URL = os.getenv('LIBRETRANSLATE_API_URL', 'https://translate.argosopentech.com')
+TRANSLATIONS_DB_FILE = os.path.join(DATA_DIR, 'translations.db')
+
+# --- Confessions Configuration ---
+CONFESSIONS_DB_FILE = os.path.join(DATA_DIR, 'confessions.db')
+
+# --- Reminders Configuration ---
+REMINDERS_DB_FILE = os.path.join(DATA_DIR, 'reminders.db')
+REMINDER_CHECK_INTERVAL = 20.0
+
+# --- AI Assistant Configuration ---
+AI_PROVIDER = os.getenv('AI_PROVIDER', 'gemini').lower() # Default to gemini if not set
+# Gemini settings
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'models/gemini-1.5-flash-latest')
+# DeepSeek settings
+DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
+DEEPSEEK_MODEL = os.getenv('DEEPSEEK_MODEL', 'deepseek-chat')
+DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
+
+# --- Radio Station Configuration ---
+POCKETBASE_URL = os.getenv('POCKETBASE_URL')
+STATIONS_FILE = os.path.join(os.path.dirname(__file__), 'stations.json')
 
 # --- Logging ---
 LOG_LEVEL = logging.INFO
 
 # --- Intents ---
-INTENTS = discord.Intents.default()
-INTENTS.message_content = True # Required for prefix commands
-INTENTS.voice_states = True
-INTENTS.guilds = True
-INTENTS.reactions = True
+INTENTS = discord.Intents.all()
+
 
 # --- Permissions ---
 PERMISSIONS = discord.Permissions()

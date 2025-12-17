@@ -6,242 +6,217 @@ import logging
 import math
 import asyncio
 
-# Import configuration and the main bot class type hint
 import config
-from core.bot import RadioBot # For type hinting
+from core.bot import RadioBot
 
 logger = logging.getLogger('discord_bot.cogs.utility')
 
-# Constants for pagination
 LIST_ITEMS_PER_PAGE = 10
-HELP_TIMEOUT = 120.0 # Seconds for pagination timeout
+HELP_TIMEOUT = 120.0
 
 class Utility(commands.Cog):
-    """Contains utility commands like help, ping, list."""
-
     def __init__(self, bot: RadioBot):
         self.bot = bot
         logger.info("Utility Cog initialized.")
 
-    # --- Ping Command ---
     @commands.hybrid_command(name="ping", description="Checks the bot's latency.")
     async def ping(self, ctx: commands.Context):
-        """Checks the bot's latency."""
-        latency = self.bot.latency * 1000
-        await ctx.send(f"Pong! Latency: {latency:.2f} ms", ephemeral=True)
+        await ctx.send(f"Pong! Latency: {self.bot.latency * 1000:.2f} ms", ephemeral=True)
 
-    # --- Paginated Help Command ---
+    # --- FULLY REVISED HELP COMMAND ---
 
-    def get_help_page_content(self, page_num: int, total_pages: int, display_prefix: str) -> discord.Embed:
-        """Creates the embed content for a specific help page."""
+    def get_help_page_content(self, page_num: int, total_pages: int, prefix: str) -> discord.Embed:
+        """Creates the rich embed for a specific help page with detailed descriptions."""
         embed = discord.Embed(color=config.DEFAULT_EMBED_COLOR)
-        try: embed.set_thumbnail(url=self.bot.user.display_avatar.url)
-        except: pass # Ignore if avatar fails
-
-        # Page 1: General & Voice
-        if page_num == 0:
-            embed.title = f"{self.bot.user.name} Help (Page 1/{total_pages})"
-            embed.description = f"Radio bot focused on 24/7 streams.\n" \
-                                f"Current Prefix: `{display_prefix}` (or @Mention)\n" \
-                                f"Also supports Slash Commands (`/`)."
-            embed.add_field(
-                name="🔊 Voice Commands",
-                value=f"**`{display_prefix}play <URL or Name>`** / `/play stream:<URL or Name>`\n"
-                      f"Plays a live radio stream from URL or predefined name (see `{display_prefix}list`).\n\n"
-                      f"**`{display_prefix}stop`** / `/stop`\n"
-                      f"Stops the current playback.\n\n"
-                      f"**`{display_prefix}leave`** / `{display_prefix}dc`\n"
-                      f"Disconnects the bot from the voice channel.\n\n"
-                      f"**`{display_prefix}now`** / `/now`\n"
-                      f"Shows the currently playing stream information again.",
-                inline=False
-            )
-
-        # Page 2: Utility & Emoji
-        elif page_num == 1:
-            embed.title = f"{self.bot.user.name} Help (Page 2/{total_pages})"
-            embed.add_field(
-                name="ℹ️ Utility Commands",
-                value=f"**`{display_prefix}help`** / `/help`\n"
-                      f"Shows this help message.\n\n"
-                      f"**`{display_prefix}list`** / `/list`\n"
-                      f"Shows the list of predefined radio stream names.\n\n"
-                      f"**`{display_prefix}ping`**\n"
-                      f"Checks the bot's latency to Discord.",
-                inline=False
-            )
-            embed.add_field(
-                name="🖼️ Emoji Commands", # New Section
-                value=f"**`{display_prefix}convert <URL> <Name>`** / `/convert link:<URL> name:<Name>`\n"
-                      f"Downloads a GIF from the URL, resizes it, and adds it as a server emoji with the given name (requires Bot & User to have 'Manage Expressions' permission).",
-                inline=False
-            )
-
-        # Page 3: Admin & Playback Control
-        elif page_num == 2:
-            embed.title = f"{self.bot.user.name} Help (Page 3/{total_pages})"
-            embed.add_field(
-                name="⚙️ Admin Commands",
-                 value=f"**`{display_prefix}setprefix <New Prefix>`** / `/setprefix new_prefix:<New Prefix>`\n"
-                       f"Changes the command prefix for this server (Admin only).\nUse `reset` to restore default (`{config.COMMAND_PREFIX}`).",
-                inline=False
-            )
-            embed.add_field(
-                name="▶️ Playback Control",
-                value=f"React with {config.STOP_REACTION} on the 'Now Playing' message to stop playback.",
-                inline=False
-            )
+        try:
+            embed.set_thumbnail(url=self.bot.user.display_avatar.url)
+        except:
+            pass
         
-        # Fallback for invalid page number
-        else:
-             embed.title = f"{self.bot.user.name} Help (Invalid Page)"
-             embed.description = "Something went wrong."
+        # Determine the bot's name to use in examples
+        bot_name = self.bot.user.name if self.bot.user else "Yuzu"
 
-        embed.set_footer(text=f"Page {page_num + 1}/{total_pages}")
+        # Page 1: Introduction & Radio
+        if page_num == 0:
+            embed.title = f"🎧 {bot_name} Help: Radio & Playback"
+            embed.description = (f"Hi! I'm {bot_name}, your 24/7 radio companion.\n\n"
+                                 f"**Prefix:** `{prefix}` or use Slash Commands (`/`).")
+            embed.add_field(name="📻 Radio Commands", value=(
+                f"**`/list`** / `{prefix}list`\n› **Browse available radio stations.**\n\n"
+                f"**`/play <query>`** / `{prefix}play <query>`\n› Play a station by **Name** or **Number**.\n› *Example:* `/play 1` or `/play lofi`\n\n"
+                f"**`/now`** / `{prefix}now`\n› See what's currently playing.\n\n"
+                f"**`/stop`** / `{prefix}stop`\n› Stop playback.\n\n"
+                f"**`/leave`** / `{prefix}dc`\n› Disconnect me from the voice channel."), inline=False)
+            embed.add_field(name="▶️ Controls", value=f"React with {config.STOP_REACTION} on the player message to stop playback.", inline=False)
+
+        # Page 2: AI Assistant
+        elif page_num == 1:
+            embed.title = f"🤖 {bot_name} Help: AI Assistant"
+            embed.description = f"Chat with me directly! Just mention me (`@Bot`) to start a conversation."
+            embed.add_field(name="How to Use", value=(
+                "I remember the last few messages, so you can ask follow-up questions!\n\n"
+                f"**Example:** `@{bot_name} What is the capital of France?`\n"
+                f"**Example:** `@{bot_name} Tell me a joke!`"
+            ), inline=False)
+            embed.add_field(name="⚠️ Privacy", value="Messages mentioned to me are sent to the AI provider (Google Gemini) for processing.", inline=False)
+
+        # Page 3: Reminders
+        elif page_num == 2:
+            embed.title = f"⏰ {bot_name} Help: Reminders"
+            embed.description = "Never forget a thing! Set personal or server-wide reminders."
+            embed.add_field(name="User Commands (Slash Only)", value=(
+                "**`/remind <message> <time> <date> ...`**\n"
+                "› Set a new reminder. Supports timezones and recurring options.\n\n"
+                "**`/reminders list`**\n"
+                "› View your upcoming reminders.\n\n"
+                "**`/reminders delete <id>`**\n"
+                "› Delete a reminder by its ID."
+            ), inline=False)
+            embed.add_field(name="Admin Config", value=(
+                "**`/reminders_admin set_role`** & **`set_channel`**\n"
+                "› Configure who can set reminders and where."
+            ), inline=False)
+            
+        # Page 4: Translation
+        elif page_num == 3:
+            embed.title = f"🌐 {bot_name} Help: Translation"
+            embed.description = "Break language barriers with automatic translation."
+            embed.add_field(name="Setup (Slash Only)", value=(
+                "**`/translate_subscribe to_channel`**\n› Automatically translate messages from one channel to another.\n\n"
+                "**`/translate_subscribe to_dm`**\n› Receive translations in your DMs."
+                ), inline=False)
+            embed.add_field(name="Management", value=("**`/translate_list`**\n› View your active translation subscriptions.\n\n" "**`/translate_unsubscribe`**\n› Stop specific translations."), inline=False)
+
+        # Page 5: Confessions
+        elif page_num == 4:
+            embed.title = f"💌 {bot_name} Help: Confessions"
+            embed.description = "Send anonymous messages safely."
+            embed.add_field(name="Commands", value=(
+                "**`/confess <user> <message>`**\n› Send an anonymous DM to a user.\n\n"
+                "**`/confessions activate` / `deactivate`**\n› Choose whether you want to receive confessions.\n\n"
+                "**`/confessions unblock_all`**\n› Unblock previously blocked senders."), inline=False)
+
+        # Page 6: Utilities & Admin
+        elif page_num == 5:
+            embed.title = f"🛠️ {bot_name} Help: Utilities"
+            embed.add_field(name="Tools", value=(
+                f"**`/say <message>`**\n› Make me say something (Pings disabled).\n\n"
+                f"**`/convert <link> <name>`**\n› Create a server emoji from a GIF or image link.\n\n"
+                f"**`/ping`**\n› Check my connection speed."), inline=False)
+            embed.add_field(name="⚙️ Admin", value=(
+                f"**`/setprefix <prefix>`** / `{prefix}setprefix`\n› Change my command prefix for this server."), inline=False)
+
+        embed.set_footer(text=f"Page {page_num + 1}/{total_pages} • Use the arrows to navigate.")
         return embed
 
-
-    @commands.hybrid_command(name="help", description="Shows the bot's help information (paginated).")
+    @commands.hybrid_command(name="help", description="Shows the bot's detailed, paginated help information.")
     async def help(self, ctx: commands.Context):
-        """Shows the bot's help information, paginated."""
         is_interaction = ctx.interaction is not None
-        
-        # --- FIX: Set ephemeral to False for pagination to work ---
-        ephemeral = False # Pagination requires a public message
-        
-        if is_interaction: await ctx.defer(ephemeral=ephemeral) # Defer publicly
+        if is_interaction: await ctx.defer(ephemeral=False)
 
-        # Determine the prefix to display in examples
-        display_prefix = config.COMMAND_PREFIX # Default
-        if ctx.guild and str(ctx.guild.id) in self.bot.guild_prefixes:
-             display_prefix = self.bot.guild_prefixes[str(ctx.guild.id)]
-        elif ctx.prefix and not ctx.prefix.startswith(f'<@'): # Use invoked prefix if available and not a mention
-             display_prefix = ctx.prefix
+        display_prefix = config.COMMAND_PREFIX
+        if ctx.guild:
+            display_prefix = self.bot.guild_prefixes.get(str(ctx.guild.id), config.COMMAND_PREFIX)
 
-        # --- Pagination Setup ---
-        total_pages = 3 # Currently 3 defined pages
+        # --- UPDATE TOTAL PAGES ---
+        total_pages = 6
         current_page = 0
-
         initial_embed = self.get_help_page_content(current_page, total_pages, display_prefix)
-        message = await ctx.send(embed=initial_embed, ephemeral=ephemeral)
+        
+        message = await ctx.send(embed=initial_embed)
+        if not message and is_interaction:
+            try: message = await ctx.interaction.original_response()
+            except discord.NotFound: logger.error(f"Failed to get original response for help in guild {ctx.guild.id if ctx.guild else 'DM'}"); return
 
-        # Get message object for interactions if ctx.send didn't return it
-        if is_interaction and not message:
-             try: message = await ctx.interaction.original_response()
-             except discord.NotFound: logger.error(f"[{ctx.guild_id if ctx.guild else 'DM'}] Failed to get original response message for help."); await ctx.send("Failed to start pagination.", ephemeral=True); return
+        if total_pages <= 1 or not message: return
+        try:
+            await message.add_reaction("◀️")
+            await message.add_reaction("▶️")
+        except discord.Forbidden: logger.warning(f"Missing 'Add Reactions' for help in guild {ctx.guild.id if ctx.guild else 'DM'}."); return
+        
+        def check(reaction, user):
+            return user.id == ctx.author.id and reaction.message.id == message.id and str(reaction.emoji) in ["◀️", "▶️"]
 
-        if total_pages <= 1 or not message: return # Exit if only 1 page or message failed
-
-        try: await message.add_reaction("◀️"); await message.add_reaction("▶️")
-        except discord.Forbidden: logger.warning(f"[{ctx.guild.id if ctx.guild else 'DM'}] Missing Add Reactions permission for help pagination."); return
-        except discord.NotFound: logger.warning(f"[{ctx.guild.id if ctx.guild else 'DM'}] Help message disappeared before reactions added."); return
-
-        def check(reaction, user): return (user.id == ctx.author.id and reaction.message.id == message.id and str(reaction.emoji) in ["◀️", "▶️"])
-
-        # --- Pagination Loop ---
         while True:
             try:
                 reaction, user = await self.bot.wait_for("reaction_add", timeout=HELP_TIMEOUT, check=check)
                 valid_move = False
-                if str(reaction.emoji) == "▶️" and current_page < total_pages - 1: current_page += 1; valid_move = True
-                elif str(reaction.emoji) == "◀️" and current_page > 0: current_page -= 1; valid_move = True
-
+                if str(reaction.emoji) == "▶️" and current_page < total_pages - 1:
+                    current_page += 1; valid_move = True
+                elif str(reaction.emoji) == "◀️" and current_page > 0:
+                    current_page -= 1; valid_move = True
+                
                 if valid_move:
-                    new_embed = self.get_help_page_content(current_page, total_pages, display_prefix)
-                    await message.edit(embed=new_embed)
-
-                # Remove user's reaction (requires Manage Messages)
-                try: await message.remove_reaction(reaction.emoji, user)
-                except discord.Forbidden: pass
-                # Only continue loop if the move was invalid (no need to edit)
-                if not valid_move: continue
-
+                    await message.edit(embed=self.get_help_page_content(current_page, total_pages, display_prefix))
+                
+                if ctx.guild:
+                    try: await message.remove_reaction(reaction.emoji, user)
+                    except: pass
             except asyncio.TimeoutError:
-                logger.debug(f"[{ctx.guild.id if ctx.guild else 'DM'}] Help pagination timeout msg {message.id}")
                 try:
                     await message.clear_reactions()
                     timeout_embed = message.embeds[0]
-                    if timeout_embed: timeout_embed.set_footer(text=f"Page {current_page + 1}/{total_pages} (Pagination timed out)"); await message.edit(embed=timeout_embed)
-                except: pass # Ignore cleanup errors
-                break # Exit loop on timeout
-            except discord.NotFound: logger.warning(f"[{ctx.guild.id if ctx.guild else 'DM'}] Help message {message.id} deleted."); break
-            except Exception as e: logger.exception(f"[{ctx.guild.id if ctx.guild else 'DM'}] Error during help pagination: {e}"); break
-
-
-    # --- Paginated List Command (Unchanged) ---
-    def create_list_page_embed(self, page_num: int, total_pages: int, stream_keys: list[str]) -> discord.Embed:
-        start_index = page_num * LIST_ITEMS_PER_PAGE
-        end_index = start_index + LIST_ITEMS_PER_PAGE
-        keys_on_page = stream_keys[start_index:end_index]
-        display_prefix = config.COMMAND_PREFIX
-
-        embed = discord.Embed(
-            title="📻 Predefined Radio Streams",
-            description=f"Use `{display_prefix}play <Name>` or `/play stream:<Name>`:",
-            color=discord.Color.orange()
-        )
+                    if timeout_embed:
+                        timeout_embed.set_footer(text=f"Page {current_page + 1}/{total_pages} (Pagination timed out)")
+                        await message.edit(embed=timeout_embed)
+                except: pass
+                break
+            except Exception as e:
+                logger.exception(f"Error during help pagination: {e}"); break
+    
+    def create_list_page_embed(self, page_num, total_pages, stream_keys):
+        start_index = page_num * LIST_ITEMS_PER_PAGE; end_index = start_index + LIST_ITEMS_PER_PAGE
+        keys_on_page = stream_keys[start_index:end_index]; display_prefix = config.COMMAND_PREFIX
+        
+        # User doesn't need to know the source (JSON vs PocketBase)
+        embed = discord.Embed(title="📻 Radio Stations", description=f"Use `{display_prefix}play <ID>` or `{display_prefix}play <Name>`.\nYou can also search by partial name.", color=discord.Color.orange())
+        
         if not keys_on_page: embed.add_field(name="Streams", value="*No streams on this page.*", inline=False)
         else:
             list_content = ""
             for i, key in enumerate(keys_on_page, start=start_index):
-                stream_data = config.PREDEFINED_STREAMS.get(key, {})
+                stream_data = self.bot.station_manager.get_station(key)
+                if not stream_data: continue
                 description = stream_data.get("desc", "No description")
-                list_content += f"**{i+1}.** `{key}` - *{description}*\n"
+                # Clean up description presentation if needed
+                list_content += f"**{i+1}.** `{key}`\n└ *{description}*\n"
             if len(list_content) > 1024: list_content = list_content[:1020] + "\n..."
             embed.add_field(name="Available Streams", value=list_content, inline=False)
-        embed.set_footer(text=f"Page {page_num + 1}/{total_pages}")
-        return embed
+        embed.set_footer(text=f"Page {page_num + 1}/{total_pages}"); return embed
 
-    @commands.hybrid_command(name="list", description="Shows the list of predefined radio streams.")
+    @commands.hybrid_command(name="list", description="Browses the list of available radio stations.")
     async def list(self, ctx: commands.Context):
         is_interaction = ctx.interaction is not None
-        ephemeral = False
-        if is_interaction: await ctx.defer(ephemeral=ephemeral)
-
-        stream_keys = list(config.PREDEFINED_STREAMS.keys())
-        if not stream_keys: await ctx.send("No predefined streams configured.", ephemeral=True); return
-
-        total_pages = math.ceil(len(stream_keys) / LIST_ITEMS_PER_PAGE)
-        current_page = 0
-
+        if is_interaction: await ctx.defer(ephemeral=False)
+        
+        # Refresh stations if using PocketBase to get latest updates
+        if config.POCKETBASE_URL:
+            await self.bot.station_manager.fetch_stations()
+            
+        stream_keys = list(self.bot.station_manager.stations.keys())
+        if not stream_keys: await ctx.send("No streams configured.", ephemeral=True); return
+        total_pages = math.ceil(len(stream_keys) / LIST_ITEMS_PER_PAGE); current_page = 0
         initial_embed = self.create_list_page_embed(current_page, total_pages, stream_keys)
-        message = await ctx.send(embed=initial_embed, ephemeral=ephemeral)
+        message = await ctx.send(embed=initial_embed)
         if is_interaction and not message:
-             try: message = await ctx.interaction.original_response()
-             except discord.NotFound: logger.error(f"[{ctx.guild_id if ctx.guild else 'DM'}] Failed original response for list."); await ctx.send("Failed pagination.", ephemeral=True); return
-
+            try: message = await ctx.interaction.original_response()
+            except: await ctx.send("Failed pagination.", ephemeral=True); return
         if total_pages <= 1 or not message: return
-
         try: await message.add_reaction("◀️"); await message.add_reaction("▶️")
-        except discord.Forbidden: logger.warning(f"[{ctx.guild.id if ctx.guild else 'DM'}] Missing Add Reactions for list."); return
-
+        except: return
         def check(reaction, user): return (user.id == ctx.author.id and reaction.message.id == message.id and str(reaction.emoji) in ["◀️", "▶️"])
-
         while True:
             try:
                 reaction, user = await self.bot.wait_for("reaction_add", timeout=HELP_TIMEOUT, check=check)
                 valid_move = False
                 if str(reaction.emoji) == "▶️" and current_page < total_pages - 1: current_page += 1; valid_move = True
                 elif str(reaction.emoji) == "◀️" and current_page > 0: current_page -= 1; valid_move = True
-
                 if valid_move:
-                    new_embed = self.create_list_page_embed(current_page, total_pages, stream_keys)
-                    await message.edit(embed=new_embed)
+                    await message.edit(embed=self.create_list_page_embed(current_page, total_pages, stream_keys))
+                if ctx.guild:
+                    try: await message.remove_reaction(reaction.emoji, user)
+                    except: pass
+            except: break
 
-                try: await message.remove_reaction(reaction.emoji, user)
-                except discord.Forbidden: pass
-                if not valid_move: continue
-
-            except asyncio.TimeoutError:
-                logger.debug(f"[{ctx.guild.id if ctx.guild else 'DM'}] List pagination timeout msg {message.id}")
-                try:
-                    await message.clear_reactions()
-                    timeout_embed = message.embeds[0]; timeout_embed.set_footer(text=f"Page {current_page + 1}/{total_pages} (Pagination timed out)"); await message.edit(embed=timeout_embed)
-                except: pass
-                break
-            except discord.NotFound: logger.warning(f"[{ctx.guild.id if ctx.guild else 'DM'}] List message {message.id} deleted."); break
-            except Exception as e: logger.exception(f"[{ctx.guild.id if ctx.guild else 'DM'}] Error during list pagination: {e}"); break
-
-# Setup function for discord.py to load the cog
 async def setup(bot: RadioBot):
     await bot.add_cog(Utility(bot))

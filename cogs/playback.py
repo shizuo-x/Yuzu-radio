@@ -398,18 +398,19 @@ class Playback(commands.Cog):
         stream_name = stream_lookup_key # Display name defaults to input
 
         # --- MODIFY DICTIONARY LOOKUP ---
-        matched_key = next((key for key in config.PREDEFINED_STREAMS if key.lower() == stream_lookup_key.lower()), None)
+        # Use StationManager's fuzzy finder
+        matched_name, station_data = self.bot.station_manager.fuzzy_find_station(stream_lookup_key)
 
-        if matched_key:
-            stream_data = config.PREDEFINED_STREAMS[matched_key]
-            stream_url = stream_data.get("url") # Get URL from inner dict
-            stream_name = matched_key # Use the canonical key as the name
+        if station_data:
+            stream_url = station_data.get("url")
+            stream_name = matched_name # Use the canonical name found by fuzzy search
+            
             if not stream_url:
-                 logger.error(f"[{guild_id}] Predefined stream '{stream_name}' is missing 'url' in config.")
+                 logger.error(f"[{guild_id}] Stream '{stream_name}' is missing 'url'.")
                  return f"Error: Configuration for stream '{stream_name}' is invalid."
-            logger.info(f"[{guild_id}] Matched predefined stream: {stream_name}")
+            logger.info(f"[{guild_id}] Matched stream: {stream_name}")
         elif not stream_url.startswith(('http://', 'https')):
-            return f"Input is not valid URL or predefined name. See `{config.COMMAND_PREFIX}list`."
+            return f"Input `{stream_input}` is not a valid URL or found in the station list (try using ID). See `{config.COMMAND_PREFIX}list`."
         # --- END MODIFY DICTIONARY LOOKUP ---
 
         result = await self.ensure_voice_and_play(guild_id, voice_channel.id, text_channel_id, stream_url, stream_name, user.id, is_manual_play=True)

@@ -1,4 +1,6 @@
 discord.py[voice]>=2.0.0
 python-dotenv
 aiohttp>=3.8.0
-Pillow>=9.0.0 # Add Pillow
+Pillow>=9.0.0
+aiosqlite>=0.17.0
+google-generativeai>=0.3.2

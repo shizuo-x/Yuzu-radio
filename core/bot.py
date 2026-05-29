@@ -128,6 +128,21 @@ class RadioBot(commands.Bot):
                 logger.info("Performing post-reconnect voice state checks...")
                 await playback_cog.check_voice_state_after_reconnect()
 
+    async def on_message(self, message: discord.Message):
+        """Override on_message to prevent command processing on mentions."""
+        if message.author.bot:
+            return
+
+        # If the message starts with the bot's mention, treat it as an AI conversation
+        # and DO NOT process it as a standard command. This prevents double-triggering
+        # (e.g. "@Bot play lofi" triggering both the AI and the 'play' command).
+        if self.user and message.content.startswith(self.user.mention):
+            # We do NOT call await self.process_commands(message) here.
+            # The AI Cog's listener will handle this message.
+            return
+
+        # For all other messages (e.g. using prefix ,,), process commands as normal.
+        await self.process_commands(message)
 
     async def on_close(self):
         """Called when the bot is shutting down."""

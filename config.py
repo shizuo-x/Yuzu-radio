@@ -14,6 +14,13 @@ DATA_DIR = "data"
 # This line ensures the 'data' directory exists when the bot starts.
 os.makedirs(DATA_DIR, exist_ok=True)
 
+# --- Data Path ---
+# All persistent data files (databases, json state) will be stored here.
+# This is crucial for data to survive Docker container restarts.
+DATA_DIR = "data"
+# This line ensures the 'data' directory exists when the bot starts.
+os.makedirs(DATA_DIR, exist_ok=True)
+
 # --- Bot Configuration ---
 BOT_TOKEN = os.getenv('DISCORD_TOKEN')
 COMMAND_PREFIX = ",,"
@@ -24,10 +31,6 @@ METADATA_FETCH_INTERVAL = 30
 # --- Updated file paths to use the data directory ---
 STATE_FILE = os.path.join(DATA_DIR, 'state.json')
 PREFIXES_FILE = os.path.join(DATA_DIR, 'prefixes.json')
-
-# --- Translation Configuration ---
-LIBRETRANSLATE_API_URL = os.getenv('LIBRETRANSLATE_API_URL', 'https://translate.argosopentech.com')
-TRANSLATIONS_DB_FILE = os.path.join(DATA_DIR, 'translations.db')
 
 # --- Confessions Configuration ---
 CONFESSIONS_DB_FILE = os.path.join(DATA_DIR, 'confessions.db')
@@ -45,6 +48,9 @@ GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'models/gemini-1.5-flash-latest')
 DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
 DEEPSEEK_MODEL = os.getenv('DEEPSEEK_MODEL', 'deepseek-chat')
 DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
+# Local/LM Studio settings
+LOCAL_AI_BASE_URL = os.getenv('LOCAL_AI_BASE_URL', 'http://localhost:1234/v1')
+LOCAL_AI_MODEL = os.getenv('LOCAL_AI_MODEL', 'local-model')
 
 # --- Radio Station Configuration ---
 POCKETBASE_URL = os.getenv('POCKETBASE_URL')

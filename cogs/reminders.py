@@ -109,6 +109,18 @@ class Reminders(commands.Cog):
     # --- UPDATED User Command ---
     reminders_group = app_commands.Group(name="reminders", description="Manage your personal reminders.")
 
+    async def create_reminder(self, user_id: int, channel_id: int, guild_id: Optional[int], message: str, due_at_utc: datetime.datetime, timezone: str = "UTC", repeat_interval_sec: Optional[int] = None):
+        """Internal method to create a reminder."""
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        is_repeating = bool(repeat_interval_sec)
+        
+        async with aiosqlite.connect(config.REMINDERS_DB_FILE) as db:
+            await db.execute("INSERT INTO reminders (user_id, guild_id, channel_id, reminder_content, due_at, created_at, is_repeating, repeat_interval, timezone) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (user_id, guild_id, channel_id, message, due_at_utc, now_utc, is_repeating, repeat_interval_sec, timezone))
+            await db.commit()
+        
+        logger.info(f"Reminder created for User {user_id} at {due_at_utc.isoformat()}.")
+        return due_at_utc
+
     @app_commands.command(name="remind", description="Set a reminder for yourself.")
     @app_commands.describe(message="What do you want to be reminded of?", time="Time in 24h format (e.g., 13:45, 09:00).", date="Date in YYYY-MM-DD format (e.g., 2025-12-25).", timezone="Your timezone. Defaults to UTC.", repeat="Should this reminder repeat?", repeat_interval_minutes="How often to repeat, in minutes (if repeating).")
     @app_commands.choices(timezone=[app_commands.Choice(name=tz, value=tz) for tz in COMMON_TIMEZONES])
@@ -149,9 +161,7 @@ class Reminders(commands.Cog):
 
         # --- Database Insertion (Unchanged) ---
         try:
-            async with aiosqlite.connect(config.REMINDERS_DB_FILE) as db:
-                await db.execute("INSERT INTO reminders (user_id, guild_id, channel_id, reminder_content, due_at, created_at, is_repeating, repeat_interval, timezone) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (interaction.user.id, interaction.guild.id if interaction.guild else None, interaction.channel.id, message, due_at_utc, now_utc, is_repeating, repeat_interval_sec, tz_str))
-                await db.commit()
+            await self.create_reminder(interaction.user.id, interaction.channel.id, interaction.guild.id if interaction.guild else None, message, due_at_utc, tz_str, repeat_interval_sec)
 
             # --- FIX: New, more informative confirmation embed ---
             embed = discord.Embed(title="✅ Reminder Set!", color=discord.Color.green())
@@ -166,19 +176,33 @@ class Reminders(commands.Cog):
             embed.set_footer(text=f"Timezone set to {tz_str}. Use /reminders list to see or delete your reminders.")
 
             await interaction.followup.send(embed=embed, ephemeral=True)
-            logger.info(f"User {interaction.user.id} set a reminder for {due_at_utc.isoformat()}.")
         except Exception as e:
             logger.exception("Failed to save reminder to database.")
             await interaction.followup.send(f"❌ An error occurred saving your reminder: {e}", ephemeral=True)
 
     # (reminders_list, reminders_delete, and admin commands are unchanged)
+    async def get_user_reminders(self, user_id: int):
+        """Internal method to get reminders for a user."""
+        async with aiosqlite.connect(config.REMINDERS_DB_FILE) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM reminders WHERE user_id = ? ORDER BY due_at ASC", (user_id,)) as cursor:
+                return await cursor.fetchall()
+
+    async def delete_user_reminder(self, user_id: int, reminder_id: int) -> bool:
+        """Internal method to delete a reminder. Returns True if deleted, False if not found."""
+        async with aiosqlite.connect(config.REMINDERS_DB_FILE) as db:
+            async with db.execute("SELECT 1 FROM reminders WHERE id = ? AND user_id = ?", (reminder_id, user_id)) as cursor:
+                if not await cursor.fetchone(): return False
+            await db.execute("DELETE FROM reminders WHERE id = ?", (reminder_id,))
+            await db.commit()
+            return True
+
     @reminders_group.command(name="list", description="Lists your upcoming reminders.")
     async def reminders_list(self, interaction: discord.Interaction):
         # ...
         await interaction.response.defer(ephemeral=True)
-        async with aiosqlite.connect(config.REMINDERS_DB_FILE) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute("SELECT * FROM reminders WHERE user_id = ? ORDER BY due_at ASC", (interaction.user.id,)) as cursor: reminders = await cursor.fetchall()
+        reminders = await self.get_user_reminders(interaction.user.id)
+        
         if not reminders: await interaction.followup.send("You have no upcoming reminders.", ephemeral=True); return
         embed = discord.Embed(title="Your Upcoming Reminders", color=config.DEFAULT_EMBED_COLOR)
         description = ""
@@ -194,11 +218,12 @@ class Reminders(commands.Cog):
     async def reminders_delete(self, interaction: discord.Interaction, reminder_id: int):
         # ...
         await interaction.response.defer(ephemeral=True)
-        async with aiosqlite.connect(config.REMINDERS_DB_FILE) as db:
-            async with db.execute("SELECT 1 FROM reminders WHERE id = ? AND user_id = ?", (reminder_id, interaction.user.id)) as cursor:
-                if not await cursor.fetchone(): await interaction.followup.send("❌ Reminder not found or you don't own it.", ephemeral=True); return
-            await db.execute("DELETE FROM reminders WHERE id = ?", (reminder_id,)); await db.commit()
-        await interaction.followup.send(f"✅ Reminder with ID `{reminder_id}` has been deleted.", ephemeral=True)
+        success = await self.delete_user_reminder(interaction.user.id, reminder_id)
+        
+        if success:
+            await interaction.followup.send(f"✅ Reminder with ID `{reminder_id}` has been deleted.", ephemeral=True)
+        else:
+            await interaction.followup.send("❌ Reminder not found or you don't own it.", ephemeral=True)
 
     reminders_admin_group = app_commands.Group(name="reminders_admin", description="Admin commands for configuring reminders.", default_permissions=discord.Permissions(administrator=True))
     @reminders_admin_group.command(name="set_role", description="[Admin] Set a role that is allowed to use the /remind command.")

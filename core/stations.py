@@ -113,6 +113,31 @@ class StationManager:
         """Returns all loaded stations."""
         return self.stations
 
+    def search_stations(self, query: str, limit: int = 5) -> List[tuple[str, Dict]]:
+        """
+        Searches stations by name, country, or tags.
+        Returns a list of (name, station_data) tuples.
+        """
+        query_lower = query.lower()
+        matches = []
+        
+        for name, data in self.stations.items():
+            # Check name
+            if query_lower in name.lower():
+                matches.append((name, data))
+                continue
+            
+            # Check country (in desc) or tags (in desc)
+            # Our internal structure puts country and tags into 'desc' for display,
+            # but we should check the raw data if available.
+            # However, _process_pb_response creates 'desc' string.
+            # Let's check 'desc' since it contains both.
+            if query_lower in data.get('desc', '').lower():
+                matches.append((name, data))
+                continue
+        
+        return matches[:limit]
+
     def fuzzy_find_station(self, query: str) -> tuple[Optional[str], Optional[Dict]]:
         """
         Finds a station by index (1-based), exact name, or partial name.

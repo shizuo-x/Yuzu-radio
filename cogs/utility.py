@@ -24,6 +24,7 @@ class Utility(commands.Cog):
         await ctx.send(f"Pong! Latency: {self.bot.latency * 1000:.2f} ms", ephemeral=True)
 
     # --- FULLY REVISED HELP COMMAND ---
+    # --- FULLY REVISED HELP COMMAND ---
 
     def get_help_page_content(self, page_num: int, total_pages: int, prefix: str) -> discord.Embed:
         """Creates the rich embed for a specific help page with detailed descriptions."""
@@ -32,6 +33,9 @@ class Utility(commands.Cog):
             embed.set_thumbnail(url=self.bot.user.display_avatar.url)
         except:
             pass
+        
+        # Determine the bot's name to use in examples
+        bot_name = self.bot.user.name if self.bot.user else "Yuzu"
         
         # Determine the bot's name to use in examples
         bot_name = self.bot.user.name if self.bot.user else "Yuzu"
@@ -48,7 +52,18 @@ class Utility(commands.Cog):
                 f"**`/stop`** / `{prefix}stop`\n› Stop playback.\n\n"
                 f"**`/leave`** / `{prefix}dc`\n› Disconnect me from the voice channel."), inline=False)
             embed.add_field(name="▶️ Controls", value=f"React with {config.STOP_REACTION} on the player message to stop playback.", inline=False)
+            embed.title = f"🎧 {bot_name} Help: Radio & Playback"
+            embed.description = (f"Hi! I'm {bot_name}, your 24/7 radio companion.\n\n"
+                                 f"**Prefix:** `{prefix}` or use Slash Commands (`/`).")
+            embed.add_field(name="📻 Radio Commands", value=(
+                f"**`/list`** / `{prefix}list`\n› **Browse available radio stations.**\n\n"
+                f"**`/play <query>`** / `{prefix}play <query>`\n› Play a station by **Name** or **Number**.\n› *Example:* `/play 1` or `/play lofi`\n\n"
+                f"**`/now`** / `{prefix}now`\n› See what's currently playing.\n\n"
+                f"**`/stop`** / `{prefix}stop`\n› Stop playback.\n\n"
+                f"**`/leave`** / `{prefix}dc`\n› Disconnect me from the voice channel."), inline=False)
+            embed.add_field(name="▶️ Controls", value=f"React with {config.STOP_REACTION} on the player message to stop playback.", inline=False)
 
+        # Page 2: AI Assistant
         # Page 2: AI Assistant
         elif page_num == 1:
             embed.title = f"🤖 {bot_name} Help: AI Assistant"
@@ -59,9 +74,32 @@ class Utility(commands.Cog):
                 f"**Example:** `@{bot_name} Tell me a joke!`"
             ), inline=False)
             embed.add_field(name="⚠️ Privacy", value="Messages mentioned to me are sent to the AI provider (Google Gemini) for processing.", inline=False)
+            embed.title = f"🤖 {bot_name} Help: AI Assistant"
+            embed.description = f"Chat with me directly! Just mention me (`@Bot`) to start a conversation."
+            embed.add_field(name="How to Use", value=(
+                "I remember the last few messages, so you can ask follow-up questions!\n\n"
+                f"**Example:** `@{bot_name} What is the capital of France?`\n"
+                f"**Example:** `@{bot_name} Tell me a joke!`"
+            ), inline=False)
+            embed.add_field(name="⚠️ Privacy", value="Messages mentioned to me are sent to the AI provider (Google Gemini) for processing.", inline=False)
 
         # Page 3: Reminders
+        # Page 3: Reminders
         elif page_num == 2:
+            embed.title = f"⏰ {bot_name} Help: Reminders"
+            embed.description = "Never forget a thing! Set personal or server-wide reminders."
+            embed.add_field(name="User Commands (Slash Only)", value=(
+                "**`/remind <message> <time> <date> ...`**\n"
+                "› Set a new reminder. Supports timezones and recurring options.\n\n"
+                "**`/reminders list`**\n"
+                "› View your upcoming reminders.\n\n"
+                "**`/reminders delete <id>`**\n"
+                "› Delete a reminder by its ID."
+            ), inline=False)
+            embed.add_field(name="Admin Config", value=(
+                "**`/reminders_admin set_role`** & **`set_channel`**\n"
+                "› Configure who can set reminders and where."
+            ), inline=False)
             embed.title = f"⏰ {bot_name} Help: Reminders"
             embed.description = "Never forget a thing! Set personal or server-wide reminders."
             embed.add_field(name="User Commands (Slash Only)", value=(
@@ -117,11 +155,14 @@ class Utility(commands.Cog):
         if not message and is_interaction:
             try: message = await ctx.interaction.original_response()
             except discord.NotFound: logger.error(f"Failed to get original response for help in guild {ctx.guild.id if ctx.guild else 'DM'}"); return
+            try: message = await ctx.interaction.original_response()
+            except discord.NotFound: logger.error(f"Failed to get original response for help in guild {ctx.guild.id if ctx.guild else 'DM'}"); return
 
         if total_pages <= 1 or not message: return
         try:
             await message.add_reaction("◀️")
             await message.add_reaction("▶️")
+        except discord.Forbidden: logger.warning(f"Missing 'Add Reactions' for help in guild {ctx.guild.id if ctx.guild else 'DM'}."); return
         except discord.Forbidden: logger.warning(f"Missing 'Add Reactions' for help in guild {ctx.guild.id if ctx.guild else 'DM'}."); return
         
         def check(reaction, user):
@@ -161,10 +202,19 @@ class Utility(commands.Cog):
         # User doesn't need to know the source (JSON vs PocketBase)
         embed = discord.Embed(title="📻 Radio Stations", description=f"Use `{display_prefix}play <ID>` or `{display_prefix}play <Name>`.\nYou can also search by partial name.", color=discord.Color.orange())
         
+        
+        # User doesn't need to know the source (JSON vs PocketBase)
+        embed = discord.Embed(title="📻 Radio Stations", description=f"Use `{display_prefix}play <ID>` or `{display_prefix}play <Name>`.\nYou can also search by partial name.", color=discord.Color.orange())
+        
         if not keys_on_page: embed.add_field(name="Streams", value="*No streams on this page.*", inline=False)
         else:
             list_content = ""
             for i, key in enumerate(keys_on_page, start=start_index):
+                stream_data = self.bot.station_manager.get_station(key)
+                if not stream_data: continue
+                description = stream_data.get("desc", "No description")
+                # Clean up description presentation if needed
+                list_content += f"**{i+1}.** `{key}`\n└ *{description}*\n"
                 stream_data = self.bot.station_manager.get_station(key)
                 if not stream_data: continue
                 description = stream_data.get("desc", "No description")
@@ -175,9 +225,16 @@ class Utility(commands.Cog):
         embed.set_footer(text=f"Page {page_num + 1}/{total_pages}"); return embed
 
     @commands.hybrid_command(name="list", description="Browses the list of available radio stations.")
+    @commands.hybrid_command(name="list", description="Browses the list of available radio stations.")
     async def list(self, ctx: commands.Context):
         is_interaction = ctx.interaction is not None
         if is_interaction: await ctx.defer(ephemeral=False)
+        
+        # Refresh stations if using PocketBase to get latest updates
+        if config.POCKETBASE_URL:
+            await self.bot.station_manager.fetch_stations()
+            
+        stream_keys = list(self.bot.station_manager.stations.keys())
         
         # Refresh stations if using PocketBase to get latest updates
         if config.POCKETBASE_URL:

@@ -14,6 +14,13 @@ DATA_DIR = "data"
 # This line ensures the 'data' directory exists when the bot starts.
 os.makedirs(DATA_DIR, exist_ok=True)
 
+# --- Data Path ---
+# All persistent data files (databases, json state) will be stored here.
+# This is crucial for data to survive Docker container restarts.
+DATA_DIR = "data"
+# This line ensures the 'data' directory exists when the bot starts.
+os.makedirs(DATA_DIR, exist_ok=True)
+
 # --- Bot Configuration ---
 BOT_TOKEN = os.getenv('DISCORD_TOKEN')
 COMMAND_PREFIX = ",,"

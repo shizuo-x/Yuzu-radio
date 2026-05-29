@@ -398,18 +398,19 @@ class Playback(commands.Cog):
         stream_name = stream_lookup_key # Display name defaults to input
 
         # --- MODIFY DICTIONARY LOOKUP ---
-        matched_key = next((key for key in config.PREDEFINED_STREAMS if key.lower() == stream_lookup_key.lower()), None)
+        # Use StationManager's fuzzy finder
+        matched_name, station_data = self.bot.station_manager.fuzzy_find_station(stream_lookup_key)
 
-        if matched_key:
-            stream_data = config.PREDEFINED_STREAMS[matched_key]
-            stream_url = stream_data.get("url") # Get URL from inner dict
-            stream_name = matched_key # Use the canonical key as the name
+        if station_data:
+            stream_url = station_data.get("url")
+            stream_name = matched_name # Use the canonical name found by fuzzy search
+            
             if not stream_url:
-                 logger.error(f"[{guild_id}] Predefined stream '{stream_name}' is missing 'url' in config.")
+                 logger.error(f"[{guild_id}] Stream '{stream_name}' is missing 'url'.")
                  return f"Error: Configuration for stream '{stream_name}' is invalid."
-            logger.info(f"[{guild_id}] Matched predefined stream: {stream_name}")
+            logger.info(f"[{guild_id}] Matched stream: {stream_name}")
         elif not stream_url.startswith(('http://', 'https')):
-            return f"Input is not valid URL or predefined name. See `{config.COMMAND_PREFIX}list`."
+            return f"Input `{stream_input}` is not a valid URL or found in the station list (try using ID). See `{config.COMMAND_PREFIX}list`."
         # --- END MODIFY DICTIONARY LOOKUP ---
 
         result = await self.ensure_voice_and_play(guild_id, voice_channel.id, text_channel_id, stream_url, stream_name, user.id, is_manual_play=True)
@@ -450,9 +451,12 @@ class Playback(commands.Cog):
         if not ctx.guild: await ctx.send("Not usable outside servers.", ephemeral=True); return
         if ctx.interaction: await ctx.defer(ephemeral=False)
 
-        guild_id = ctx.guild.id
+        result = await self._leave_command_logic(ctx.guild.id, ctx.guild.voice_client)
+        await ctx.send(result)
+
+    async def _leave_command_logic(self, guild_id, vc):
+        """Shared logic for leaving voice."""
         state = self.bot.guild_states.get(guild_id)
-        vc = ctx.guild.voice_client
 
         if state:
             state['should_play'] = False; logger.info(f"[{guild_id}] Leave command: should_play=False."); self.bot.save_state()
@@ -462,48 +466,45 @@ class Playback(commands.Cog):
             channel_name = vc.channel.name
             logger.info(f"[{guild_id}] Disconnecting from '{channel_name}' via command.")
             await vc.disconnect(force=False) # Triggers on_voice_state_update
-            await ctx.send(f"Left `{channel_name}`.")
+            return f"Left `{channel_name}`."
         else:
-            await ctx.send("Not connected.")
+            return "Not connected."
 
 
     @commands.hybrid_command(name="now", aliases=['np'], description="Shows the currently playing stream.")
     async def now(self, ctx: commands.Context):
         """Shows the currently playing stream."""
         if not ctx.guild: await ctx.send("Not usable outside servers.", ephemeral=True); return
-        # Now command should be fast, defer might not be needed unless embed creation is slow
-        # if ctx.interaction: await ctx.defer(ephemeral=True) # Ephemeral for 'now' seems reasonable
-
-        state = self.bot.guild_states.get(ctx.guild.id)
-        vc = ctx.guild.voice_client
-        # Check vc status as well
-        if state and state.get('should_play') and vc and vc.is_playing():
-            logger.info(f"[{ctx.guild.id}] Resending Now Playing embed via command.")
-            # Force recreation of embed to show latest metadata immediately
-            await self.send_or_edit_now_playing_embed(ctx.guild.id, force_new=True)
-            # If interaction, send ephemeral confirmation, otherwise maybe delete prefix message
-            if ctx.interaction:
-                try:
-                    # Need to check if response already sent if we didn't defer
-                    if not ctx.interaction.response.is_done():
-                        await ctx.interaction.response.send_message("Showing current stream info.", ephemeral=True)
-                    else:
-                        await ctx.interaction.followup.send("Showing current stream info.", ephemeral=True)
-                except discord.errors.NotFound: pass # Interaction might expire quickly
-            elif ctx.command: # Check if it was triggered by a prefix command
+        
+        result = await self._now_command_logic(ctx.guild.id, ctx.guild.voice_client)
+        
+        if result == "reshown":
+             if ctx.interaction:
+                if not ctx.interaction.response.is_done():
+                    await ctx.interaction.response.send_message("Showing current stream info.", ephemeral=True)
+             elif ctx.command:
                  try: await ctx.message.delete()
                  except: pass
         else:
-            # If interaction, respond accordingly
-            if ctx.interaction:
-                try:
-                    if not ctx.interaction.response.is_done():
-                         await ctx.interaction.response.send_message("Not currently playing anything.", ephemeral=True)
-                    else:
-                         await ctx.interaction.followup.send("Not currently playing anything.", ephemeral=True)
-                except discord.errors.NotFound: pass
-            else: # Prefix command response
-                 await ctx.send("Not currently playing anything.")
+             if ctx.interaction:
+                 if not ctx.interaction.response.is_done():
+                     await ctx.interaction.response.send_message(result, ephemeral=True)
+             else:
+                 await ctx.send(result)
+
+    async def _now_command_logic(self, guild_id, vc):
+        """Shared logic for showing now playing."""
+        state = self.bot.guild_states.get(guild_id)
+        if state and state.get('should_play') and vc and vc.is_playing():
+            logger.info(f"[{guild_id}] Resending Now Playing embed via command.")
+            await self.send_or_edit_now_playing_embed(guild_id, force_new=True)
+            return "reshown"
+        
+        # If we are here, nothing is playing or bot not connected properly for playback
+        if state and state.get('stream_name'):
+             return f"Currently tasked to play `{state['stream_name']}`, but not actively playing audio right now."
+        
+        return "Not currently playing anything."
 
 
     # --- Auto-Reconnect Check ---

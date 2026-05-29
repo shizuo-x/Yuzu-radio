@@ -70,7 +70,7 @@ class ConfessionView(discord.ui.View):
 
 class ApprovalView(discord.ui.View):
     def __init__(self, bot: RadioBot):
-        super().__init__(timeout=600.0); self.bot = bot; self.message: Optional[discord.Message] = None
+        super().__init__(timeout=86400.0); self.bot = bot; self.message: Optional[discord.Message] = None
     async def on_timeout(self):
         if self.message:
             try:

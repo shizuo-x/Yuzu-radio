@@ -1,11 +1,19 @@
-# version: '3.8'
+# ./discord-radio-bot-modular/docker-compose.yml
+
+version: '3.8'
+
 services:
-  radio-bot:
+  yuzu:
     build: .
-    container_name: discord-radio-bot-modular
+    container_name: yuzu-discord-bot
     restart: unless-stopped
     env_file:
       - .env
-    # Optional volume for logs if needed
-    # volumes:
-    #   - ./logs:/app/logs
+    
+    volumes:
+      # This maps the './data' folder on your host machine
+      # to the '/app/data' folder inside the container.
+      # The bot's code lives in /app, and it writes data to /app/data.
+      # This keeps the data separate from the code inside the container.
+      - ./data:/app/data
+      # - ./logs:/app/logs

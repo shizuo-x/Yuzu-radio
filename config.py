@@ -7,45 +7,53 @@ import logging
 
 load_dotenv()
 
+# --- Data Path ---
+# All persistent data files (databases, json state) will be stored here.
+# This is crucial for data to survive Docker container restarts.
+DATA_DIR = "data"
+# This line ensures the 'data' directory exists when the bot starts.
+os.makedirs(DATA_DIR, exist_ok=True)
+
 # --- Bot Configuration ---
 BOT_TOKEN = os.getenv('DISCORD_TOKEN')
 COMMAND_PREFIX = ",,"
 RECONNECT_DELAY = 5
 MAX_RECONNECT_ATTEMPTS = 3
 STOP_REACTION = '⏹️'
-STATE_FILE = 'state.json'
 METADATA_FETCH_INTERVAL = 30
-
-# --- Translation Configuration ---
-LIBRETRANSLATE_API_URL = os.getenv('LIBRETRANSLATE_API_URL', 'https://translate.argosopentech.com')
-TRANSLATIONS_DB_FILE = 'translations.db'
+# --- Updated file paths to use the data directory ---
+STATE_FILE = os.path.join(DATA_DIR, 'state.json')
+PREFIXES_FILE = os.path.join(DATA_DIR, 'prefixes.json')
 
 # --- Confessions Configuration ---
-CONFESSIONS_DB_FILE = 'confessions.db'
+CONFESSIONS_DB_FILE = os.path.join(DATA_DIR, 'confessions.db')
 
-# --- Predefined Radio Streams ---
-PREDEFINED_STREAMS = {
-    "name1": {
-        "url": "link to station",
-        "desc": "short description"
-    },
-}
+# --- Reminders Configuration ---
+REMINDERS_DB_FILE = os.path.join(DATA_DIR, 'reminders.db')
+REMINDER_CHECK_INTERVAL = 20.0
+
+# --- AI Assistant Configuration ---
+AI_PROVIDER = os.getenv('AI_PROVIDER', 'gemini').lower() # Default to gemini if not set
+# Gemini settings
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'models/gemini-1.5-flash-latest')
+# DeepSeek settings
+DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
+DEEPSEEK_MODEL = os.getenv('DEEPSEEK_MODEL', 'deepseek-chat')
+DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
+# Local/LM Studio settings
+LOCAL_AI_BASE_URL = os.getenv('LOCAL_AI_BASE_URL', 'http://localhost:1234/v1')
+LOCAL_AI_MODEL = os.getenv('LOCAL_AI_MODEL', 'local-model')
+
+# --- Radio Station Configuration ---
+POCKETBASE_URL = os.getenv('POCKETBASE_URL')
+STATIONS_FILE = os.path.join(os.path.dirname(__file__), 'stations.json')
 
 # --- Logging ---
 LOG_LEVEL = logging.INFO
 
 # --- Intents ---
-# --- FIX: Use discord.Intents.all() to enable all privileged intents ---
-# This ensures that if they are enabled in the Dev Portal, the bot will use them.
 INTENTS = discord.Intents.all()
-# If you want to be more specific instead of .all():
-# INTENTS = discord.Intents.default()
-# INTENTS.message_content = True # Required for prefix commands
-# INTENTS.voice_states = True
-# INTENTS.guilds = True
-# INTENTS.reactions = True
-# INTENTS.members = True # Explicitly enable the members intent
-# INTENTS.presences = True # Often useful with the members intent
 
 
 # --- Permissions ---

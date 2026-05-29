@@ -5,7 +5,7 @@
 [![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=flat&logo=docker&logoColor=white)](https://www.docker.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Yuzu** is a flexible and feature-rich Discord bot built with a powerful modular architecture. Originally a 24/7 radio bot, it has expanded to include advanced server utilities like cross-server translation and high-quality GIF-to-emoji conversion. It's designed for easy self-hosting and extensibility using Docker.
+**Yuzu** is a flexible and feature-rich Discord bot built with a powerful modular architecture. Originally a 24/7 radio bot, it has expanded to include advanced server utilities like high-quality GIF-to-emoji conversion. It's designed for easy self-hosting and extensibility using Docker.
 
 ## ✨ Core Features
 
@@ -15,14 +15,6 @@
 *   **High Quality Audio:** Uses FFmpeg for reliable and high-quality audio streaming.
 *   **Configurable Stations:** Easily add your own favorite radio stations to a central config file.
 *   **Paginated List:** Browse the station list with descriptions using a clean, paginated embed.
-
-### 🌐 Cross-Server Translation
-*   **Real-Time Translation:** Automatically translate messages from any channel in a mutual server.
-*   **Flexible Destinations:** Send translated messages to a channel in another server or directly to your DMs.
-*   **Advanced Filtering:** Translate messages from everyone, or only from specific users/bots.
-*   **Language Control:** Force a specific source language for tricky slang or mixed-language channels.
-*   **Free & Open Source:** Powered by LibreTranslate, allowing you to use public instances or self-host for ultimate control.
-*   **Secure:** Permissions are strictly enforced. Users must have "Manage Server" permissions in a destination server to set up a channel subscription, preventing spam.
 
 ### 🖼️ High-Quality Emoji Converter
 *   **GIF to Emoji:** Convert any GIF from a URL into a high-quality server emoji with one command.
@@ -42,8 +34,6 @@
 ### Prerequisites
 *   **Docker & Docker Compose:** Required to run the bot. Install from the [official Docker website](https://www.docker.com/get-started).
 *   **Git:** Required to clone the repository.
-*   **(Optional) LibreTranslate Instance:** For the best translation performance, you can self-host LibreTranslate. See their [documentation here](https://github.com/LibreTranslate/LibreTranslate). Otherwise, the bot uses a public instance by default.
-
 ### 🛠️ Setup Instructions
 
 1.  **Clone the Repository:**
@@ -71,9 +61,7 @@
 4.  **Edit the `.env` File:**
     *   Open the `.env` file with a text editor.
     *   Paste your bot token: `DISCORD_TOKEN=YOUR_BOT_TOKEN_GOES_HERE`
-    *   **(Optional)** If you are self-hosting LibreTranslate, add its URL: `LIBRETRANSLATE_API_URL=http://your_server_ip:5000`
-
-5.  **Build and Run the Bot:**
+    5.  **Build and Run the Bot:**
     *   Make sure Docker is running on your machine.
     *   From your terminal, inside the project folder, run:
     ```bash
@@ -96,12 +84,6 @@ The bot supports both slash commands and prefix commands (default prefix is `,,`
 *   `/stop`: Stops playback.
 *   `/list`: Shows the paginated list of predefined radio stations.
 *   `/now`: Re-sends the "Now Playing" embed.
-
-### Translator Commands (`/translate_...`)
-*   `/translate_subscribe to_channel`: Creates a translation bridge between two channels. Requires `Manage Server` permission in the destination server.
-*   `/translate_subscribe to_dm`: Creates a translation bridge to your private messages.
-*   `/translate_list`: Privately lists all your active subscriptions and their IDs.
-*   `/translate_unsubscribe ids:<ID, "all">`: Deletes one, multiple (comma-separated), or all of your subscriptions.
 
 ### Utility Commands
 *   `/convert link:<URL> name:<Name>`: Converts a GIF into a server emoji.

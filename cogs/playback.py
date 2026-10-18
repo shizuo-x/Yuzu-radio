@@ -3,10 +3,12 @@
 import discord
 from discord.ext import commands, tasks
 import asyncio
+import concurrent.futures
 import functools
 import logging
 import re
 import datetime
+import time
 from typing import Dict, Any, Optional
 import aiohttp
 
@@ -16,22 +18,29 @@ from core.bot import RadioBot # Used for type hinting self.bot
 
 logger = logging.getLogger('discord_bot.cogs.playback')
 
+# --- Local constants (config.py is frozen for this phase; new values defined here) ---
+STREAM_PROBE_TIMEOUT = 6        # Seconds for the pre-flight stream health check (I6)
+STREAM_PROBE_READ_BYTES = 2048  # Bytes sampled from the stream during the probe (I6)
+PLAY_VERIFY_GRACE = 2.75        # Grace after voice_client.play() before verifying is_playing() (I4)
+WATCHDOG_INTERVAL = 10          # Seconds between silent-stream checks (I8)
+WATCHDOG_SILENT_THRESHOLD = 15  # Seconds with no audio before watchdog recovery (I8)
+VOICE_CONNECT_TIMEOUT = 30.0    # Voice channel connect timeout (I10)
+
 class Playback(commands.Cog):
     """Handles voice connection, radio playback, related commands and tasks."""
 
     def __init__(self, bot: RadioBot):
         self.bot = bot
         self.metadata_loop.start()
+        self.watchdog_loop.start()
         logger.info("Playback Cog initialized.")
 
     def cog_unload(self):
         self.metadata_loop.cancel()
-        logger.info("Playback Cog unloaded, metadata loop cancelled.")
+        self.watchdog_loop.cancel()
+        logger.info("Playback Cog unloaded, metadata and watchdog loops cancelled.")
 
     # --- Helper Methods ---
-    # (cleanup_now_playing_message, send_or_edit_now_playing_embed, _play_internal,
-    #  after_playback_handler, reconnect_after_delay, ensure_voice_and_play,
-    #  resume_playback remain unchanged from the previous version)
     async def cleanup_now_playing_message(self, guild_id: int):
         """Safely deletes the existing 'Now Playing' message."""
         state = self.bot.guild_states.get(guild_id)
@@ -71,8 +80,7 @@ class Playback(commands.Cog):
         embed = discord.Embed(title="▶️ Now Playing", color=discord.Color.green(), timestamp=datetime.datetime.now(datetime.timezone.utc))
         stream_name = state.get('stream_name', 'Unknown Stream')
         requester_id = state.get('requester_id')
-        requester = await self.bot.fetch_user(requester_id) if requester_id else None
-        requester_mention = requester.mention if requester else "Unknown"
+        requester_mention = f"<@{requester_id}>" if requester_id else "Unknown" # Mention built from the ID, no REST call (I10)
         metadata = state.get('current_metadata')
 
         embed.add_field(name="Stream", value=f"`{stream_name}`", inline=False)
@@ -80,7 +88,7 @@ class Playback(commands.Cog):
         embed.add_field(name="Requested By", value=requester_mention, inline=False)
         embed.add_field(name="Playback Position", value="🔵 **LIVE**", inline=False)
         try: embed.set_footer(text=f"{self.bot.user.name} Radio", icon_url=self.bot.user.display_avatar.url)
-        except: embed.set_footer(text=f"{self.bot.user.name} Radio")
+        except Exception: logger.debug("Embed footer icon failed, using text-only footer."); embed.set_footer(text=f"{self.bot.user.name} Radio")
 
         message_id = state.get('now_playing_message_id')
         message = None
@@ -107,13 +115,80 @@ class Playback(commands.Cog):
             except Exception as e: logger.error(f"[{guild_id}] Error sending new embed: {e}", exc_info=True); state['now_playing_message_id'] = None
 
 
-    async def _play_internal(self, guild_id: int, voice_client: discord.VoiceClient):
-        """Internal logic to start FFmpeg playback."""
+    async def _notify_playback_failure(self, guild_id: int, message: str):
+        """Posts a short, non-technical failure notice to the guild's text channel (I5)."""
+        state = self.bot.guild_states.get(guild_id)
+        if not state: return
+        channel_id = state.get('text_channel_id')
+        guild = self.bot.get_guild(guild_id)
+        if not guild or not channel_id: logger.warning(f"[{guild_id}] Failure notice not sent: guild/text channel missing."); return
+        channel = guild.get_channel(channel_id)
+        if not channel or not isinstance(channel, discord.TextChannel): logger.warning(f"[{guild_id}] Failure notice not sent: channel {channel_id} invalid."); return
+        try:
+            await channel.send(message)
+            logger.info(f"[{guild_id}] Posted playback failure notice.")
+        except discord.HTTPException as e:
+            logger.warning(f"[{guild_id}] Failed to post playback failure notice: {e}")
+
+    async def _probe_stream(self, guild_id: int, stream_url: str) -> Optional[str]:
+        """Pre-flight stream health check before joining voice (I6). Returns None if healthy, else a user-facing error."""
+        if not self.bot.http_session or self.bot.http_session.closed:
+            logger.warning(f"[{guild_id}] Stream probe skipped: HTTP session unavailable.")
+            return None # Cannot probe; let normal playback error handling decide
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Icy-MetaData': '1',
+        }
+        try:
+            async with self.bot.http_session.get(stream_url, headers=headers, timeout=aiohttp.ClientTimeout(total=STREAM_PROBE_TIMEOUT)) as response:
+                status = response.status
+                content_type = (response.headers.get('Content-Type') or '').lower()
+                chunk = await response.content.read(STREAM_PROBE_READ_BYTES)
+        except asyncio.TimeoutError:
+            logger.info(f"[{guild_id}] Stream probe timed out for {stream_url}")
+            return "That station looks offline right now (timed out), try another."
+        except aiohttp.ClientError as e:
+            logger.info(f"[{guild_id}] Stream probe connection error for {stream_url}: {e}")
+            return "That station looks offline right now (connection failed), try another."
+
+        if status in (401, 403):
+            return f"That station rejected the connection (HTTP {status}) — it may be region-blocked. Try another."
+        if not 200 <= status < 400:
+            return f"That station looks offline right now (HTTP {status}), try another."
+        content_type_ok = any(part in content_type for part in ('audio/', 'video/', 'application/octet-stream'))
+        if content_type_ok or chunk:
+            logger.debug(f"[{guild_id}] Stream probe healthy: HTTP {status}, type='{content_type}', bytes={len(chunk)}")
+            return None
+        logger.info(f"[{guild_id}] Stream probe unhealthy: HTTP {status}, type='{content_type}', no bytes received.")
+        return "That station looks offline right now (no audio received), try another."
+
+    def _cancel_reconnect_task(self, guild_id: int):
+        """Cancels any live reconnect task for a guild. Safe when called from that task itself (I7)."""
+        state = self.bot.guild_states.get(guild_id)
+        if not state: return
+        task = state.get('reconnect_task')
+        if task and not task.done() and task is not asyncio.current_task():
+            task.cancel()
+            state['reconnect_task'] = None
+            logger.info(f"[{guild_id}] Cancelled live reconnect task (single-flight).")
+
+    async def _schedule_reconnect(self, guild_id: int):
+        """Single-flight reconnect scheduler: cancels any live task first, then stores a strong reference to the new one (I7)."""
+        state = self.bot.guild_states.get(guild_id)
+        if not state or not state.get('should_play'):
+            logger.info(f"[{guild_id}] Reconnect not scheduled: no state or should_play=False.")
+            return
+        self._cancel_reconnect_task(guild_id)
+        state['reconnect_task'] = asyncio.create_task(self.reconnect_after_delay(guild_id))
+        logger.info(f"[{guild_id}] Scheduled reconnect task (attempt {state.get('retries', '?')}).")
+
+    async def _play_internal(self, guild_id: int, voice_client: discord.VoiceClient) -> bool:
+        """Internal logic to start FFmpeg playback. Returns True only if playback started."""
         state = self.bot.guild_states.get(guild_id)
         if not state or not state.get('should_play') or not state.get('url'):
             logger.warning(f"[{guild_id}] _play_internal skipped: invalid state or URL.")
             if state: state['should_play'] = False; self.bot.save_state() # Ensure state is saved if stopping
-            return
+            return False
 
         stream_url = state['url']
         stream_name = state.get('stream_name', 'Unknown Stream')
@@ -123,27 +198,35 @@ class Playback(commands.Cog):
             if voice_client.is_playing() or voice_client.is_paused(): voice_client.stop(); await asyncio.sleep(0.5)
             ffmpeg_options = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -analyzeduration 5000000 -probesize 5000000', 'options': '-vn -loglevel warning'}
             audio_source = discord.FFmpegPCMAudio(stream_url, **ffmpeg_options)
-            after_callback = functools.partial(self.after_playback_handler, guild_id) # Pass self for method call
+            play_epoch = state.get('play_epoch', 0)
+            after_callback = functools.partial(self.after_playback_handler, guild_id, play_epoch) # Epoch makes superseded callbacks stale (I1)
             voice_client.play(audio_source, after=after_callback)
 
             logger.info(f"[{guild_id}] FFmpeg playback started for {stream_name}")
-            state['retries'] = 0
+            state['retries'] = 0 # Retries reset ONLY on a successful start (I7)
             state['is_resuming'] = False # Clear resuming flag
             self.bot.save_state() # Save state after successful start
 
             await self.send_or_edit_now_playing_embed(guild_id, force_new=True)
+            return True
 
         except Exception as e:
             logger.error(f"[{guild_id}] Error starting FFmpeg playback for '{stream_name}': {e}", exc_info=True)
             state['should_play'] = False
             self.bot.save_state()
-            # Optionally notify text channel here
+            await self._notify_playback_failure(guild_id, f"⚠️ Couldn't start `{stream_name}` — the stream may be down. Try another station.") # I5a
+            return False
 
-    def after_playback_handler(self, guild_id: int, error: Optional[Exception]):
-        """Callback after playback ends or errors. Handles state and reconnection."""
+    def after_playback_handler(self, guild_id: int, play_epoch: int, error: Optional[Exception]):
+        """Callback after playback ends or errors. Handles state and reconnection. Stale (superseded) epochs never mutate state (I1)."""
         state = self.bot.guild_states.get(guild_id)
         if not state:
             logger.warning(f"[{guild_id}] after_playback_handler called but no state found.")
+            return
+
+        if state.get('play_epoch', 0) != play_epoch:
+            # A newer play/stop superseded this source; do not touch current state or embed (I1)
+            logger.info(f"[{guild_id}] Stale after-callback (epoch {play_epoch} != current {state.get('play_epoch', 0)}). Ignoring.")
             return
 
         should_play = state.get('should_play', False) # Check intent *before* modifying state
@@ -153,7 +236,7 @@ class Playback(commands.Cog):
         cleanup_future = asyncio.run_coroutine_threadsafe(self.cleanup_now_playing_message(guild_id), self.bot.loop)
         try:
             cleanup_future.result(timeout=5) # Optional: wait briefly for task submission
-        except TimeoutError:
+        except concurrent.futures.TimeoutError:
             logger.warning(f"[{guild_id}] Timeout waiting for cleanup task submission in 'after' handler.")
         except Exception as e:
              logger.error(f"[{guild_id}] Error submitting cleanup task in 'after' handler: {e}")
@@ -165,15 +248,19 @@ class Playback(commands.Cog):
                 state['retries'] = state.get('retries', 0) + 1
                 if state['retries'] <= config.MAX_RECONNECT_ATTEMPTS:
                     logger.warning(f"[{guild_id}] Playback error while should_play=True. Attempting reconnect {state['retries']}/{config.MAX_RECONNECT_ATTEMPTS} in {config.RECONNECT_DELAY}s.")
-                    # Use run_coroutine_threadsafe for reconnect scheduling
-                    reconnect_future = asyncio.run_coroutine_threadsafe(self.reconnect_after_delay(guild_id), self.bot.loop)
+                    # Single-flight reconnect scheduler (I7), submitted from the player thread
+                    reconnect_future = asyncio.run_coroutine_threadsafe(self._schedule_reconnect(guild_id), self.bot.loop)
                     try: reconnect_future.result(timeout=5)
-                    except TimeoutError: logger.warning(f"[{guild_id}] Timeout waiting for reconnect task submission.")
+                    except concurrent.futures.TimeoutError: logger.warning(f"[{guild_id}] Timeout waiting for reconnect task submission.")
                     except Exception as e: logger.error(f"[{guild_id}] Error submitting reconnect task: {e}")
                 else:
                     logger.error(f"[{guild_id}] Max reconnect attempts ({config.MAX_RECONNECT_ATTEMPTS}) reached after error. Stopping playback permanently.")
                     state['should_play'] = False
                     self.bot.save_state() # Save the stopped state
+                    notify_future = asyncio.run_coroutine_threadsafe(self._notify_playback_failure(guild_id, f"⚠️ Couldn't reconnect to `{state.get('stream_name', 'the stream')}` after {config.MAX_RECONNECT_ATTEMPTS} tries. Playback stopped — try again later."), self.bot.loop) # I5b
+                    try: notify_future.result(timeout=5)
+                    except concurrent.futures.TimeoutError: logger.warning(f"[{guild_id}] Timeout waiting for give-up notice submission.")
+                    except Exception as e: logger.error(f"[{guild_id}] Error submitting give-up notice: {e}")
             else:
                 logger.info(f"[{guild_id}] Playback error occurred, but should_play=False (manual stop during error?). Not attempting reconnect.")
                 state['should_play'] = False; state['retries'] = 0; self.bot.save_state()
@@ -200,9 +287,15 @@ class Playback(commands.Cog):
 
         if not all([vc_id, url, name]):
             logger.error(f"[{guild_id}] Reconnect failed: Missing state info. Stopping.")
-            state['should_play'] = False; self.bot.save_state(); return
+            state['should_play'] = False; self.bot.save_state()
+            await self._notify_playback_failure(guild_id, "⚠️ Couldn't resume playback — saved state was incomplete. Playback stopped.") # I5
+            return
 
-        await self.ensure_voice_and_play(guild_id, vc_id, txt_id, url, name, req_id, is_manual_play=False)
+        result = await self.ensure_voice_and_play(guild_id, vc_id, txt_id, url, name, req_id, is_manual_play=False)
+        if not result.startswith("▶️") and state.get('should_play'):
+            # Give-up paths that already posted a notice clear should_play; post only for otherwise-silent failures (I5)
+            logger.warning(f"[{guild_id}] Reconnect attempt failed: {result}")
+            await self._notify_playback_failure(guild_id, f"⚠️ Couldn't resume `{name}` automatically. Playback stopped — try playing it again.")
 
 
     async def ensure_voice_and_play(self, guild_id: int, voice_channel_id: Optional[int], text_channel_id: Optional[int], stream_url: str, stream_name: str, requester_id: Optional[int], is_manual_play: bool = False):
@@ -217,12 +310,15 @@ class Playback(commands.Cog):
 
         # --- Update state ---
         if guild_id not in self.bot.guild_states: self.bot.guild_states[guild_id] = {}
+        self._cancel_reconnect_task(guild_id) # A fresh play supersedes any pending reconnect (I7)
         self.bot.guild_states[guild_id].update({
             'url': stream_url, 'stream_name': stream_name, 'requester_id': requester_id,
             'text_channel_id': text_channel_id, 'voice_channel_id': voice_channel_id,
             'should_play': True, 'retries': self.bot.guild_states[guild_id].get('retries', 0),
-            'vc': guild.voice_client, 'now_playing_message_id': self.bot.guild_states[guild_id].get('now_playing_message_id'),
+            'now_playing_message_id': self.bot.guild_states[guild_id].get('now_playing_message_id'),
             'current_metadata': None, 'is_resuming': not is_manual_play,
+            'play_epoch': self.bot.guild_states[guild_id].get('play_epoch', 0) + 1, # Supersedes the live source's callbacks (I1/I3)
+            'starting_at': time.monotonic(), # Watchdog grace while connecting/verifying (I8)
         })
         logger.info(f"[{guild_id}] Updating state: should_play=True, VC={voice_channel_id}, URL={stream_url}")
 
@@ -235,18 +331,31 @@ class Playback(commands.Cog):
                 else: logger.info(f"[{guild_id}] Already in correct VC: {voice_channel.name}")
             else:
                 logger.info(f"[{guild_id}] Connecting to VC: {voice_channel.name}")
-                voice_client = await voice_channel.connect(timeout=60.0, reconnect=True)
-                self.bot.guild_states[guild_id]['vc'] = voice_client # Store new VC
+                voice_client = await voice_channel.connect(timeout=VOICE_CONNECT_TIMEOUT, reconnect=True)
 
             if not voice_client or not voice_client.is_connected(): raise Exception("VC connection failed.")
 
-            await self._play_internal(guild_id, voice_client) # Start playback
-            return f"▶️ Now playing: `{stream_name}`"
+            started = await self._play_internal(guild_id, voice_client) # Start playback
+            if not started:
+                # _play_internal already posted a failure notice (I5a)
+                return f"Error: Could not start playing `{stream_name}`. Try another station."
+
+            await asyncio.sleep(PLAY_VERIFY_GRACE) # I4: give the source a moment before trusting it
+            if voice_client.is_playing():
+                logger.info(f"[{guild_id}] Playback verified playing for '{stream_name}'.")
+                return f"▶️ Now playing: `{stream_name}`"
+
+            # Verification failed: return a real error (I4); reconnect paths post the notice (I5)
+            logger.warning(f"[{guild_id}] Playback verification failed for '{stream_name}' (not playing after {PLAY_VERIFY_GRACE}s).")
+            return f"Error: Stream `{stream_name}` didn't start in time. Try another station."
 
         except Exception as e:
             logger.error(f"[{guild_id}] Error in ensure_voice_and_play for '{stream_name}': {e}", exc_info=True)
             self.bot.guild_states[guild_id]['should_play'] = False; self.bot.save_state()
+            await self._notify_playback_failure(guild_id, f"⚠️ Couldn't connect and play `{stream_name}`. Playback stopped — try again in a moment.") # I5
             return f"An error occurred connecting or playing: {e}"
+        finally:
+            self.bot.guild_states[guild_id]['starting_at'] = None # Clear the watchdog grace guard (I8)
 
 
     async def resume_playback(self, guild_id: int, voice_channel_id: Optional[int], text_channel_id: Optional[int], stream_url: Optional[str], stream_name: Optional[str], requester_id: Optional[int]):
@@ -264,7 +373,6 @@ class Playback(commands.Cog):
 
 
     # --- Listeners ---
-    # (on_voice_state_update, on_reaction_add remain unchanged)
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):
         """Handle voice state changes, especially for the bot itself."""
@@ -276,24 +384,19 @@ class Playback(commands.Cog):
         if before.channel and not after.channel: # Bot disconnected
             logger.info(f"[{guild_id}] Bot disconnected from VC '{before.channel.name}'.")
             if state:
-                state['vc'] = None
                 if state.get('should_play'):
                     logger.warning(f"[{guild_id}] Bot disconnected unexpectedly while should_play=True! Attempting reconnect.")
-                    state['retries'] = 0 # Reset retries
-                    # Use create_task as this is already in async context
-                    asyncio.create_task(self.reconnect_after_delay(guild_id))
+                    await self._schedule_reconnect(guild_id) # Single-flight (I7); retries reset only on successful start
                 else:
                     logger.info(f"[{guild_id}] Bot disconnect expected. Resetting state.")
-                    state['retries'] = 0; self.bot.save_state()
+                    self.bot.save_state()
                     await self.cleanup_now_playing_message(guild_id)
 
         elif not before.channel and after.channel: # Bot connected
             logger.info(f"[{guild_id}] Bot connected to VC '{after.channel.name}'.")
-            if state: state['vc'] = member.guild.voice_client
 
         elif before.channel != after.channel: # Bot moved
              logger.info(f"[{guild_id}] Bot moved from '{before.channel.name}' to '{after.channel.name}'.")
-             if state: state['vc'] = member.guild.voice_client
 
     @commands.Cog.listener()
     async def on_reaction_add(self, reaction: discord.Reaction, user: discord.User | discord.Member):
@@ -307,19 +410,23 @@ class Playback(commands.Cog):
             vc = reaction.message.guild.voice_client
             if vc and vc.is_connected():
                 state['should_play'] = False # Set intent *before* stopping
+                state['play_epoch'] = state.get('play_epoch', 0) + 1 # Stales the source's after-callback (I1/I2)
+                self._cancel_reconnect_task(guild_id)
+                self.bot.save_state()
                 logger.info(f"[{guild_id}] Stopping playback via reaction.")
-                if vc.is_playing() or vc.is_paused(): vc.stop() # Triggers after_handler
-                else: self.bot.save_state(); await self.cleanup_now_playing_message(guild_id) # Cleanup if stopped but connected
+                if vc.is_playing() or vc.is_paused(): vc.stop() # After-callback is stale; cleanup is explicit below (I2)
+                await self.cleanup_now_playing_message(guild_id)
                 try: await reaction.remove(user)
-                except: pass # Ignore permission errors removing reaction
+                except discord.HTTPException: pass # Ignore permission errors removing reaction
                 try: await reaction.message.channel.send(f"⏹️ Playback stopped by {user.mention}.", delete_after=10)
-                except: pass
+                except discord.HTTPException: pass
             else: # Bot not connected, but reaction exists
                 logger.info(f"[{guild_id}] Stop reaction but bot not connected. Cleaning state/message.")
-                state['should_play'] = False; self.bot.save_state(); await self.cleanup_now_playing_message(guild_id)
+                state['should_play'] = False; state['play_epoch'] = state.get('play_epoch', 0) + 1
+                self._cancel_reconnect_task(guild_id)
+                self.bot.save_state(); await self.cleanup_now_playing_message(guild_id)
 
     # --- Tasks ---
-    # (metadata_loop and its before_loop remain unchanged)
     @tasks.loop(seconds=config.METADATA_FETCH_INTERVAL)
     async def metadata_loop(self):
         """Fetches and updates ICY metadata for active streams."""
@@ -329,7 +436,9 @@ class Playback(commands.Cog):
         active_guild_ids = list(self.bot.guild_states.keys())
         for guild_id in active_guild_ids:
             state = self.bot.guild_states.get(guild_id)
-            if state and state.get('should_play') and state.get('url') and state.get('vc') and state['vc'].is_playing():
+            guild = self.bot.get_guild(guild_id)
+            vc = guild.voice_client if guild else None # Resolve the live client each iteration (I9)
+            if state and state.get('should_play') and state.get('url') and vc and vc.is_playing():
                 stream_url = state['url']
                 logger.debug(f"[{guild_id}] Fetching metadata for: {stream_url}")
                 metadata = None
@@ -360,6 +469,50 @@ class Playback(commands.Cog):
 
     @metadata_loop.before_loop
     async def before_metadata_loop(self):
+        await self.bot.wait_until_ready() # Wait for bot connection
+
+
+    @tasks.loop(seconds=WATCHDOG_INTERVAL)
+    async def watchdog_loop(self):
+        """Detects silent streams (should_play=True but no audio) and recovers them (I8)."""
+        now = time.monotonic()
+        for guild_id, state in list(self.bot.guild_states.items()):
+            try:
+                if not state.get('should_play'): continue
+                guild = self.bot.get_guild(guild_id)
+                vc = guild.voice_client if guild else None # Resolve the live client each iteration (I9)
+                if vc and vc.is_connected() and (vc.is_playing() or vc.is_paused()):
+                    state['last_playing_at'] = now # Refreshed whenever audio is observed
+                    continue
+                if state.get('starting_at') is not None: continue # Mid-connect/verify grace; never fire here (I8)
+                last_playing_at = state.get('last_playing_at')
+                if last_playing_at is None:
+                    state['last_playing_at'] = now # Baseline before judging silence
+                    continue
+                if now - last_playing_at <= WATCHDOG_SILENT_THRESHOLD: continue
+
+                state['last_playing_at'] = now # Avoid an immediate re-trigger
+                state['retries'] = state.get('retries', 0) + 1 # Recovery counts against retries (I8)
+                if state['retries'] > config.MAX_RECONNECT_ATTEMPTS:
+                    logger.error(f"[{guild_id}] Watchdog: silent for over {WATCHDOG_SILENT_THRESHOLD}s and max reconnect attempts reached. Giving up.")
+                    await self._notify_playback_failure(guild_id, f"⚠️ Lost the stream for `{state.get('stream_name', 'the station')}` and couldn't recover. Playback stopped — try `,play` again later.") # I5c
+                    if vc and vc.is_connected(): await vc.disconnect(force=True)
+                    state['should_play'] = False
+                    self.bot.save_state()
+                    await self.cleanup_now_playing_message(guild_id)
+                    continue
+                logger.warning(f"[{guild_id}] Watchdog: stream silent for over {WATCHDOG_SILENT_THRESHOLD}s. Recovery attempt {state['retries']}/{config.MAX_RECONNECT_ATTEMPTS}.")
+                station = self.bot.station_manager.get_station(state.get('stream_name')) if state.get('stream_name') else None
+                fresh_url = (station or {}).get('url')
+                if fresh_url and fresh_url != state.get('url'):
+                    logger.info(f"[{guild_id}] Watchdog: station URL changed in the station list; switching to the fresh URL.")
+                    state['url'] = fresh_url
+                await self._schedule_reconnect(guild_id) # Recovery uses the single-flight helper (I7/I8)
+            except Exception as e:
+                logger.exception(f"[{guild_id}] Watchdog error for guild: {e}")
+
+    @watchdog_loop.before_loop
+    async def before_watchdog_loop(self):
         await self.bot.wait_until_ready() # Wait for bot connection
 
 
@@ -409,9 +562,15 @@ class Playback(commands.Cog):
                  logger.error(f"[{guild_id}] Stream '{stream_name}' is missing 'url'.")
                  return f"Error: Configuration for stream '{stream_name}' is invalid."
             logger.info(f"[{guild_id}] Matched stream: {stream_name}")
-        elif not stream_url.startswith(('http://', 'https')):
+        elif not stream_url.startswith(('http://', 'https://')):
             return f"Input `{stream_input}` is not a valid URL or found in the station list (try using ID). See `{config.COMMAND_PREFIX}list`."
         # --- END MODIFY DICTIONARY LOOKUP ---
+
+        # Pre-flight health probe BEFORE joining voice (I6)
+        probe_error = await self._probe_stream(guild_id, stream_url)
+        if probe_error:
+            logger.info(f"[{guild_id}] Pre-flight probe rejected '{stream_name}': {probe_error}")
+            return probe_error
 
         result = await self.ensure_voice_and_play(guild_id, voice_channel.id, text_channel_id, stream_url, stream_name, user.id, is_manual_play=True)
         return result
@@ -428,20 +587,26 @@ class Playback(commands.Cog):
         await ctx.send(result)
 
     async def _stop_command_logic(self, guild_id):
-        """Shared logic for stopping playback."""
+        """Shared logic for stopping playback. Stop paths clean up explicitly; stale after-callbacks do nothing (I1/I2)."""
         state = self.bot.guild_states.get(guild_id)
         guild = self.bot.get_guild(guild_id)
         vc = guild.voice_client if guild else None
 
-        if state: state['should_play'] = False; logger.info(f"[{guild_id}] Stop command: should_play=False.")
+        if state:
+            state['should_play'] = False
+            state['play_epoch'] = state.get('play_epoch', 0) + 1 # Stales the live source's after-callback (I1)
+            self._cancel_reconnect_task(guild_id)
+            logger.info(f"[{guild_id}] Stop command: should_play=False.")
+            self.bot.save_state()
+            await self.cleanup_now_playing_message(guild_id) # Explicit cleanup, not via the after-callback (I2)
 
         if vc and vc.is_connected():
-            if vc.is_playing() or vc.is_paused(): vc.stop(); return "⏹️ Playback stopped." # after_handler saves state and cleans embed
+            if vc.is_playing() or vc.is_paused():
+                vc.stop() # After-callback is stale per the epoch bump; cleanup already done above (I2)
+                return "⏹️ Playback stopped."
             else: # Connected but not playing
-                if state: self.bot.save_state(); await self.cleanup_now_playing_message(guild_id) # Explicit cleanup
                 return "Nothing was playing, but I am connected."
         else: # Not connected
-            if state: self.bot.save_state(); await self.cleanup_now_playing_message(guild_id) # Ensure cleanup if message exists
             return "Not currently connected to voice."
 
 
@@ -455,11 +620,14 @@ class Playback(commands.Cog):
         await ctx.send(result)
 
     async def _leave_command_logic(self, guild_id, vc):
-        """Shared logic for leaving voice."""
+        """Shared logic for leaving voice. Cleans up explicitly; stale after-callbacks do nothing (I1/I2)."""
         state = self.bot.guild_states.get(guild_id)
 
         if state:
-            state['should_play'] = False; logger.info(f"[{guild_id}] Leave command: should_play=False."); self.bot.save_state()
+            state['should_play'] = False
+            state['play_epoch'] = state.get('play_epoch', 0) + 1 # Stales the live source's after-callback (I1)
+            self._cancel_reconnect_task(guild_id)
+            logger.info(f"[{guild_id}] Leave command: should_play=False."); self.bot.save_state()
             await self.cleanup_now_playing_message(guild_id) # Explicit cleanup
 
         if vc and vc.is_connected():
@@ -484,7 +652,7 @@ class Playback(commands.Cog):
                     await ctx.interaction.response.send_message("Showing current stream info.", ephemeral=True)
              elif ctx.command:
                  try: await ctx.message.delete()
-                 except: pass
+                 except discord.HTTPException: pass
         else:
              if ctx.interaction:
                  if not ctx.interaction.response.is_done():
@@ -516,12 +684,10 @@ class Playback(commands.Cog):
                 vc = guild.voice_client
                 if not vc or not vc.is_connected():
                     logger.warning(f"[{guild_id}] Post-reconnect check: VC missing/disconnected while should_play=True. Triggering reconnect.")
-                    state['retries'] = 0
-                    asyncio.create_task(self.reconnect_after_delay(guild_id))
+                    await self._schedule_reconnect(guild_id) # Single-flight (I7); retries reset only on successful start
                 elif not vc.is_playing() and state.get('url'):
                      logger.warning(f"[{guild_id}] Post-reconnect check: Connected but not playing while should_play=True. Attempting to restart play.")
-                     state['retries'] = 0
-                     asyncio.create_task(self._play_internal(guild_id, vc))
+                     await self._schedule_reconnect(guild_id) # Single-flight (I7); retries reset only on successful start
 
 
 # --- Setup Function ---

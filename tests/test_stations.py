@@ -142,15 +142,19 @@ ok(sm.last_fetch_ok is True and sm.last_fetch > 0, "fetch hygiene flags set")
 import core.stations as S
 fake_config.POCKETBASE_URL = "http://legacy:8090"
 fake_config.POCKETBASE_URLS = " http://a:1/ , http://b:2 ,, http://a "
-ok(S._pb_candidates() == ["http://a:1", "http://b:2", "http://a", "http://legacy:8090"],
-   "candidates: URLS split/trim/dedupe + legacy appended once")
+ok(S._pb_candidates() == ["http://a:1", "http://b:2", "http://a",
+                          "http://host.docker.internal:8090", "http://legacy:8090"],
+   "candidates: URLS split/trim/dedupe, then default host endpoint, then legacy")
 fake_config.POCKETBASE_URLS = ""
-ok(S._pb_candidates() == ["http://legacy:8090"], "candidates: legacy single-var fallback")
+ok(S._pb_candidates() == ["http://host.docker.internal:8090", "http://legacy:8090"],
+   "candidates: default host endpoint first, then legacy (the prod shape)")
 fake_config.POCKETBASE_URLS = "http://x"
 fake_config.POCKETBASE_URL = ""
-ok(S._pb_candidates() == ["http://x"], "candidates: URLS-only when legacy empty")
+ok(S._pb_candidates() == ["http://x", "http://host.docker.internal:8090"],
+   "candidates: explicit URLS, then default host endpoint")
 fake_config.POCKETBASE_URLS = ""
-ok(S._pb_candidates() == [], "candidates: empty when nothing configured (JSON path)")
+ok(S._pb_candidates() == ["http://host.docker.internal:8090"],
+   "candidates: only the default when nothing configured")
 fake_config.POCKETBASE_URL = ""  # restore fixture behavior
 
 print(f"\n{len(PASS)} passed, {len(FAIL)} failed")

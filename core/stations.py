@@ -31,7 +31,9 @@ def _make_station_id(name: str) -> str:
 def _pb_candidates() -> List[str]:
     """PocketBase endpoint candidates in preference order.
 
-    POCKETBASE_URLS (comma-separated) first, then legacy POCKETBASE_URL.
+    POCKETBASE_URLS (comma-separated) first, then the Docker host's own
+    PocketBase (host.docker.internal:8090 - prod runs PB + bot on the same
+    machine; fails fast elsewhere), then legacy POCKETBASE_URL.
     Trailing slashes stripped; duplicates removed; order preserved.
     """
     raw = getattr(config, 'POCKETBASE_URLS', '') or ''
@@ -41,6 +43,10 @@ def _pb_candidates() -> List[str]:
         if u and u not in seen:
             seen.add(u)
             out.append(u)
+    # Default first-chance endpoint: PocketBase published on the Docker host
+    # itself (prod runs PB + bot on the same machine). Fails fast elsewhere.
+    if not any('host.docker.internal' in u for u in out):
+        out.append('http://host.docker.internal:8090')
     legacy = (getattr(config, 'POCKETBASE_URL', None) or '').strip().rstrip('/')
     if legacy and legacy not in seen:
         out.append(legacy)

@@ -3,8 +3,14 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
+import asyncio
 import logging
-import google.generativeai as genai
+
+try:
+    import google.generativeai as genai
+except ImportError:
+    genai = None
+
 from typing import Optional
 
 import config
@@ -17,7 +23,9 @@ class DevTools(commands.Cog):
 
     def __init__(self, bot: RadioBot):
         self.bot = bot
-        if config.GEMINI_API_KEY:
+        if genai is None:
+            logger.warning("DevTools Cog: google-generativeai library is not installed; Gemini commands disabled.")
+        elif config.GEMINI_API_KEY:
             try:
                 genai.configure(api_key=config.GEMINI_API_KEY)
                 logger.info("DevTools Cog: Gemini configured.")
@@ -35,6 +43,9 @@ class DevTools(commands.Cog):
         if not config.GEMINI_API_KEY:
             await ctx.send("❌ Gemini API key is not configured.", ephemeral=True)
             return
+        if genai is None:
+            await ctx.send("❌ The `google-generativeai` library is not installed, so Gemini commands are unavailable.", ephemeral=True)
+            return
 
         # Defer ephemerally as this is an owner-only command
         await ctx.defer(ephemeral=True)
@@ -47,7 +58,9 @@ class DevTools(commands.Cog):
             )
             
             supported_models = []
-            for m in genai.list_models():
+            # genai.list_models() is a blocking network call: run it off the event loop.
+            genai_sdk = genai  # local alias (narrowed non-None by the guard above)
+            for m in await asyncio.to_thread(lambda: list(genai_sdk.list_models())):
                 if 'generateContent' in m.supported_generation_methods:
                     supported_models.append(m.name)
             

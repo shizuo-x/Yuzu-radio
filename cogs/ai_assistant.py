@@ -3,14 +3,14 @@
 import discord
 from discord.ext import commands
 import logging
-from collections import deque
-from typing import Dict, Deque, Tuple, Optional
+import re
+from collections import OrderedDict, deque
+from typing import Dict, Deque, Tuple, Optional, List
 import asyncio
 import datetime
 
 import config
 from core.bot import RadioBot
-from cogs.ai_backends.gemini import GeminiBackend
 from cogs.ai_backends.deepseek import DeepSeekBackend
 from cogs.ai_backends.local import LocalBackend
 
@@ -20,6 +20,8 @@ logger = logging.getLogger('discord_bot.cogs.ai_assistant')
 BOT_NAME = "Ishee"
 MAX_HISTORY_LENGTH = 10
 COOLDOWN_SECONDS = 5.0
+# LRU cap: only the N most recently active channels keep conversation state.
+MAX_ACTIVE_CHANNELS = 50
 
 TRANSIENT_ERROR_PATTERNS = [
     "join a voice channel",
@@ -30,8 +32,7 @@ TRANSIENT_ERROR_PATTERNS = [
     "no audio is being played",
     "not connected to a voice",
     "i'm not in a voice",
-    "no stations found",
-    "error executing"
+    "no stations found"
 ]
 
 class AIAssistant(commands.Cog):
@@ -39,7 +40,11 @@ class AIAssistant(commands.Cog):
 
     def __init__(self, bot: RadioBot):
         self.bot = bot
-        self.conversation_history: Dict[int, Deque[Tuple[str, str]]] = {}
+        # OrderedDict doubles as an LRU: most-recently-active channel last.
+        self.conversation_history: OrderedDict[int, Deque[Tuple[str, str]]] = OrderedDict()
+        # Per-channel disambiguation store: last search result as an ordered
+        # list of (station_id, station_name).
+        self.last_search_results: Dict[int, List[Tuple[str, str]]] = {}
         self.is_enabled = False
         self.backend = None
         
@@ -47,6 +52,8 @@ class AIAssistant(commands.Cog):
         logger.info(f"AI Assistant attempting to initialize with provider: '{self.provider}'")
         
         if self.provider == 'gemini':
+            # Lazy import: only pull in google.generativeai when actually needed.
+            from cogs.ai_backends.gemini import GeminiBackend
             self.backend = GeminiBackend()
             if self.backend.model:
                 self.is_enabled = True
@@ -63,10 +70,36 @@ class AIAssistant(commands.Cog):
             
         self.cooldown = commands.CooldownMapping.from_cooldown(1, COOLDOWN_SECONDS, commands.BucketType.user)
 
-    async def get_ai_response(self, channel_id: int, user_prompt: str, user_id: int, guild_id: int, message_obj: discord.Message) -> Optional[str]:
+    def _touch_channel(self, channel_id: int) -> Deque[Tuple[str, str]]:
+        """Returns the channel's history deque, refreshing its LRU position.
+        Creates it if needed and evicts the least-recently-active channel
+        (plus its search-candidate store) beyond MAX_ACTIVE_CHANNELS."""
+        history = self.conversation_history.get(channel_id)
+        if history is None:
+            history = deque(maxlen=MAX_HISTORY_LENGTH * 2)
+            self.conversation_history[channel_id] = history
+            while len(self.conversation_history) > MAX_ACTIVE_CHANNELS:
+                evicted_id, _ = self.conversation_history.popitem(last=False)
+                self.last_search_results.pop(evicted_id, None)
+                logger.debug(f"Evicted AI history for inactive channel {evicted_id} (LRU cap {MAX_ACTIVE_CHANNELS}).")
+        else:
+            self.conversation_history.move_to_end(channel_id)
+        return history
+
+    def _last_search_block(self, channel_id: int) -> str:
+        """Renders the per-channel candidate store for the system prompt."""
+        candidates = self.last_search_results.get(channel_id) or []
+        if not candidates:
+            return "None yet in this channel."
+        lines = [f"{i}. {name} (station_id: {sid or 'n/a'})"
+                 for i, (sid, name) in enumerate(candidates[:10], 1)]
+        return "\n".join(lines)
+
+    async def get_ai_response(self, channel_id: int, user_prompt: str, user_id: int, guild_id: int,
+                              message_obj: discord.Message, pending_context: Optional[List[str]] = None) -> Optional[str]:
         if not self.backend: return None
         
-        history = self.conversation_history.get(channel_id, deque(maxlen=MAX_HISTORY_LENGTH * 2))
+        history = self._touch_channel(channel_id)
         
         # Real-time state checks
         bot_name = self.bot.user.name if self.bot.user else BOT_NAME
@@ -86,33 +119,33 @@ User Voice: {user_vc_status}
 Bot Voice: {bot_vc_status}
 CRITICAL: Always trust this state over past conversation history.
 
-=== CRITICAL TOOL EXECUTION MANDATES (READ CAREFULLY) ===
-You are an AI controlling a real Discord bot. YOU CANNOT PERFORM ACTIONS JUST BY TYPING TEXT. 
-If you roleplay an action (e.g. saying "Playing now!" without using the tool), the bot will do NOTHING.
+=== TOOL USE PROTOCOL (READ CAREFULLY) ===
+You control a real Discord bot through tools. Typing an action WITHOUT calling a tool does NOTHING.
+Tools may CHAIN within one reply: call a tool, read its result, then call another tool or answer the user — all before replying. Example: "play some jazz" -> call search_radio(tag="jazz"), then call play_radio with the top hit's station_id, then confirm to the user.
 
-1. TO PLAY MUSIC: You MUST physically call the `play_radio` tool. 
-   -> If the user tells you to play a specific station, CALL THE TOOL.
-   -> If you ask the user "Did you mean [Station]?" and they reply "yes", YOU MUST CALL THE `play_radio` TOOL IMMEDIATELY for that station.
-2. TO SEARCH: You MUST call the `search_radio` tool. NEVER guess, hallucinate, or invent radio station names.
-   -> The database has tags (e.g., "90's", "Rock", "English") and countries (e.g., "Malaysia", "International"). You can search using these terms!
-3. TO CHECK NOW PLAYING: You MUST call the `now_playing` tool.
-4. TO STOP: You MUST call the `stop_radio` tool.
+1. search_radio(query?, country?, tag?, limit?): structured search over the station database.
+   - query: free text (name/tag/country match); country: e.g. "Malaysia"; tag: e.g. "Rock", "90's"; limit: 1-10 (default 5).
+   - NEVER invent station names. Always search first when unsure.
+2. play_radio(station_id or station_name): plays a station.
+   - Prefer station_id taken from a search_radio result (exact, never fails on typos).
+   - station_name is fuzzy-matched, or may be an ordinal "1".."10" from the last search results in this channel.
+3. Other tools: now_playing, stop_radio, leave_voice, set_reminder, list_reminders, delete_reminder.
+4. If a tool returns an error, fix your arguments and try again, or tell the user the exact error. Never pretend an action succeeded.
+5. When a search returns multiple matches and the user's request was ambiguous, either play the single obvious top hit, or present up to 8 numbered options and STOP (wait for the user to pick).
 
-=== WORKFLOW EXAMPLES ===
-- User: "Play rock" -> You: call `search_radio` with query "rock". Show results to user.
-- User: "Play a Malaysian station" -> You: call `search_radio` with query "Malaysia".
-- User: "yes" (confirming a station you just suggested) -> You: call `play_radio` with the exact station name immediately. Do not just say "Playing it!".
-- If any tool returns an error, tell the user the exact error. Do not pretend the action succeeded.
+=== LAST SEARCH RESULTS (reply with ordinal or station_id to play) ===
+{self._last_search_block(channel_id)}
 """
 
         # Define the tool executor callback
         async def tool_executor_callback(tool_name, tool_args):
-            return await self._execute_tool(tool_name, tool_args, user_id, guild_id, message_obj)
+            return await self._execute_tool(tool_name, tool_args, user_id, guild_id, message_obj, pending_context)
 
         return await self.backend.generate_response(list(history), user_prompt, system_instructions, tool_executor_callback)
 
-    async def _execute_tool(self, name, args, user_id, guild_id, message_obj):
-        """Executes the tool requested by the AI."""
+    async def _execute_tool(self, name, args, user_id, guild_id, message_obj, pending_context=None):
+        """Executes the tool requested by the AI. Args arrive pre-validated
+        and normalized by the backend's validation gateway."""
         try:
             if name == "play_radio":
                 playback_cog = self.bot.get_cog("Playback")
@@ -120,45 +153,81 @@ If you roleplay an action (e.g. saying "Playing now!" without using the tool), t
                 
                 member = message_obj.guild.get_member(user_id)
                 if not member or not member.voice: return "Error: User must be in a voice channel to play radio."
-                
+
+                channel_id = message_obj.channel.id
+                station_id = args.get('station_id')
+                station_name = (args.get('station_name') or '').strip()
+                target = None
+
+                if station_id:
+                    # ID-reference protocol: resolve exact id first.
+                    await self.bot.station_manager.ensure_fresh()
+                    hit = self.bot.station_manager.get_by_id(station_id)
+                    if not hit:
+                        return f"Error: station_id '{station_id}' was not found. Ask the user to pick a station from the latest search results."
+                    target = hit[0]
+                elif station_name:
+                    if station_name.isdigit() and 1 <= int(station_name) <= 10:
+                        # Ordinal referencing the last search results.
+                        ordinal = int(station_name)
+                        candidates = self.last_search_results.get(channel_id) or []
+                        if ordinal > len(candidates):
+                            return (f"Error: '{ordinal}' is outside the last search results "
+                                    f"({len(candidates)} shown). Ask the user to choose again.")
+                        target = candidates[ordinal - 1][1]
+                    else:
+                        # Frozen fuzzy-resolving play pipeline handles the rest.
+                        target = station_name
+                else:
+                    # Bare confirmation ("yes") with exactly one stored candidate.
+                    candidates = self.last_search_results.get(channel_id) or []
+                    if len(candidates) == 1:
+                        target = candidates[0][1]
+                    else:
+                        return ("Error: no station specified. Ask the user which station to play "
+                                "(an ordinal 1-10 from the last search, a station_id, or a name).")
+
                 result = await playback_cog._play_command_logic(
                     guild_id=guild_id,
                     user=member,
                     text_channel_id=message_obj.channel.id,
                     voice_channel=member.voice.channel,
-                    stream_input=args["station_name"]
+                    stream_input=target
                 )
                 return f"Tool Execution Result: {result}"
 
             elif name == "search_radio":
-                matches = self.bot.station_manager.search_stations(args["query"], limit=5)
+                station_manager = self.bot.station_manager
+                await station_manager.ensure_fresh()
+                matches = station_manager.search_stations(
+                    query=args.get('query') or None,
+                    limit=args.get('limit', 5),
+                    country=args.get('country'),
+                    tag=args.get('tag')
+                )
                 if not matches: return "Error: No stations found matching that query."
-                
-                result_text = "Found these stations:\n"
-                for name_str, data in matches:
-                    # Dynamically extract country and tags to feed to the AI
-                    country = data.get('country', '')
-                    tags = data.get('tags', [])
-                    
-                    # Formatting tags from array into a comma-separated string if needed
-                    if isinstance(tags, list):
-                        tags_str = ", ".join(tags)
-                    else:
-                        tags_str = str(tags)
-                        
-                    # Build a smart description based on available Pocketbase metadata
-                    details = []
-                    if country: details.append(f"Country: {country}")
-                    if tags_str: details.append(f"Tags: {tags_str}")
-                    
-                    # Fallback to general desc if neither tags nor country exist
-                    if not details and 'desc' in data:
-                        details.append(f"Desc: {data['desc']}")
-                        
-                    details_str = " | ".join(details)
-                    result_text += f"- {name_str} ({details_str})\n"
-                    
-                return result_text
+
+                channel_id = message_obj.channel.id
+                self.last_search_results[channel_id] = [
+                    ((data.get('station_id') or ''), sname) for sname, data in matches
+                ]
+
+                lines = []
+                compact = []
+                for i, (sname, data) in enumerate(matches, 1):
+                    country = data.get('country') or 'Unknown'
+                    tags = data.get('tags') or []
+                    tags_str = ", ".join(tags) if isinstance(tags, list) else str(tags)
+                    sid = data.get('station_id') or ''
+                    lines.append(f"{i}. {sname} | Country: {country} | Tags: {tags_str or 'none'} | station_id: {sid}")
+                    compact.append(f"{i}. {sname} (station_id: {sid})")
+
+                # Ground follow-up turns on a compact summary of these results.
+                if pending_context is not None:
+                    pending_context.append("Last search results: " + "; ".join(compact))
+
+                return ("Found these stations (play one with play_radio using its station_id "
+                        "or the ordinal):\n" + "\n".join(lines))
 
             elif name == "stop_radio":
                 playback_cog = self.bot.get_cog("Playback")
@@ -230,7 +299,9 @@ If you roleplay an action (e.g. saying "Playing now!" without using the tool), t
         if not self.is_enabled or message.author.bot or not message.guild or not self.bot.user:
             return
 
-        if not message.content.startswith(self.bot.user.mention):
+        # Mention gate: matches both <@id> and the nickname form <@!id>.
+        mention_match = re.match(rf'^<@!?{self.bot.user.id}>\s*', message.content)
+        if not mention_match:
             return
 
         logger.info(f"Bot was mentioned by {message.author}. Proceeding with AI response logic.")
@@ -242,28 +313,31 @@ If you roleplay an action (e.g. saying "Playing now!" without using the tool), t
 
         try:
             async with message.channel.typing():
-                user_input = message.content[len(self.bot.user.mention):].strip()
+                user_input = message.content[mention_match.end():].strip()
                 if not user_input:
                     await message.reply(f"Hello there! I'm {BOT_NAME}, how can I help? 😊")
                     return
 
                 channel_id = message.channel.id
+                pending_context: List[str] = []
                 ai_response_text = await self.get_ai_response(
                     channel_id=channel_id,
                     user_prompt=user_input,
                     user_id=message.author.id,
                     guild_id=message.guild.id,
-                    message_obj=message
+                    message_obj=message,
+                    pending_context=pending_context
                 )
                 
                 if not ai_response_text: raise Exception("Received an empty response from the AI.")
 
-                if channel_id not in self.conversation_history: 
-                    self.conversation_history[channel_id] = deque(maxlen=MAX_HISTORY_LENGTH * 2)
-                
                 if not self._is_transient_error(ai_response_text):
-                    self.conversation_history[channel_id].append(('user', user_input))
-                    self.conversation_history[channel_id].append(('ai', ai_response_text))
+                    history = self._touch_channel(channel_id)
+                    history.append(('user', user_input))
+                    # Compact tool-result summaries ground follow-up turns.
+                    for context_line in pending_context:
+                        history.append(('ai', context_line))
+                    history.append(('ai', ai_response_text))
                 
                 if len(ai_response_text) <= 2000: 
                     await message.reply(ai_response_text)

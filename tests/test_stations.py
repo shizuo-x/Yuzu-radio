@@ -138,6 +138,21 @@ asyncio.run(sm.fetch_stations())
 ok(list(sm.stations.keys()) == names, "re-fetch stays sorted & identical")
 ok(sm.last_fetch_ok is True and sm.last_fetch > 0, "fetch hygiene flags set")
 
+# 10. PocketBase endpoint candidate chain
+import core.stations as S
+fake_config.POCKETBASE_URL = "http://legacy:8090"
+fake_config.POCKETBASE_URLS = " http://a:1/ , http://b:2 ,, http://a "
+ok(S._pb_candidates() == ["http://a:1", "http://b:2", "http://a", "http://legacy:8090"],
+   "candidates: URLS split/trim/dedupe + legacy appended once")
+fake_config.POCKETBASE_URLS = ""
+ok(S._pb_candidates() == ["http://legacy:8090"], "candidates: legacy single-var fallback")
+fake_config.POCKETBASE_URLS = "http://x"
+fake_config.POCKETBASE_URL = ""
+ok(S._pb_candidates() == ["http://x"], "candidates: URLS-only when legacy empty")
+fake_config.POCKETBASE_URLS = ""
+ok(S._pb_candidates() == [], "candidates: empty when nothing configured (JSON path)")
+fake_config.POCKETBASE_URL = ""  # restore fixture behavior
+
 print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
 os.unlink(tmp.name)
 sys.exit(1 if FAIL else 0)

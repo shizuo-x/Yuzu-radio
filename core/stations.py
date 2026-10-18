@@ -28,6 +28,25 @@ def _make_station_id(name: str) -> str:
     return re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')
 
 
+def _pb_candidates() -> List[str]:
+    """PocketBase endpoint candidates in preference order.
+
+    POCKETBASE_URLS (comma-separated) first, then legacy POCKETBASE_URL.
+    Trailing slashes stripped; duplicates removed; order preserved.
+    """
+    raw = getattr(config, 'POCKETBASE_URLS', '') or ''
+    out, seen = [], set()
+    for part in raw.split(','):
+        u = part.strip().rstrip('/')
+        if u and u not in seen:
+            seen.add(u)
+            out.append(u)
+    legacy = (getattr(config, 'POCKETBASE_URL', None) or '').strip().rstrip('/')
+    if legacy and legacy not in seen:
+        out.append(legacy)
+    return out
+
+
 class StationManager:
     """Manages radio stations from PocketBase or a local JSON file."""
 
@@ -38,6 +57,7 @@ class StationManager:
         self._fetch_lock = asyncio.Lock()
         self.last_fetch = 0.0  # time.monotonic() of the last fetch attempt
         self.last_fetch_ok = False
+        self.last_pb_url = None  # PocketBase endpoint that last served successfully
 
     async def fetch_stations(self):
         """Fetches stations from the configured source."""
@@ -54,9 +74,19 @@ class StationManager:
             await self.fetch_stations()
 
     async def _fetch_from_pocketbase(self):
-        """Fetches stations from a PocketBase instance (paginated)."""
-        url = f"{config.POCKETBASE_URL}/api/collections/stations/records"
+        """Fetches stations, trying each configured PocketBase endpoint in order.
+
+        Candidates come from _pb_candidates() (POCKETBASE_URLS chain first,
+        then POCKETBASE_URL). First endpoint that serves a full paginated set
+        wins; a hung endpoint cannot stall the chain (10 s per request).
+        """
+        candidates = _pb_candidates()
         max_pages = 30  # Hard safety cap
+
+        if not candidates:
+            logger.warning("No PocketBase URL configured; falling back to JSON.")
+            self._load_from_json()
+            return
 
         temp_session = None
         try:
@@ -68,20 +98,37 @@ class StationManager:
                 temp_session = aiohttp.ClientSession()
             session = temp_session or self.bot.http_session
 
-            new_stations: Dict[str, Dict] = {}
-            page = 1
-            total_pages = 1
-            while page <= total_pages and page <= max_pages:
-                params = {"page": page, "perPage": 100, "sort": "-created"}
-                async with session.get(url, params=params) as response:
-                    total_pages = await self._process_pb_response(response, new_stations)
-                page += 1
+            for base in candidates:
+                url = f"{base}/api/collections/stations/records"
+                try:
+                    new_stations: Dict[str, Dict] = {}
+                    page = 1
+                    total_pages = 1
+                    while page <= total_pages and page <= max_pages:
+                        params = {"page": page, "perPage": 100, "sort": "-created"}
+                        async with session.get(url, params=params,
+                                               timeout=aiohttp.ClientTimeout(total=10)) as response:
+                            total_pages = await self._process_pb_response(response, new_stations)
+                        page += 1
+                except Exception as e:
+                    logger.warning(f"PocketBase endpoint {base} failed: {e}")
+                    continue
 
-            self.stations = new_stations
-            self._rebuild_sorted()
-            self.source = "PocketBase"
-            self.last_fetch_ok = True
-            logger.info(f"Loaded {len(self.stations)} stations from PocketBase.")
+                self.stations = new_stations
+                self._rebuild_sorted()
+                self.source = "PocketBase"
+                self.last_pb_url = base
+                self.last_fetch_ok = True
+                logger.info(f"Loaded {len(self.stations)} stations from PocketBase ({base}).")
+                return
+
+            # Every candidate failed
+            self.last_fetch_ok = False
+            if not self.stations:
+                logger.warning("All PocketBase endpoints failed. Falling back to JSON.")
+                self._load_from_json()
+            else:
+                logger.warning(f"All PocketBase endpoints failed. Keeping {len(self.stations)} cached stations.")
         except Exception as e:
             self.last_fetch_ok = False
             if not self.stations:

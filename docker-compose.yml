@@ -9,7 +9,13 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    
+
+    extra_hosts:
+      # Lets the container reach services on the Docker HOST (e.g. PocketBase
+      # published on the same machine) via http://host.docker.internal:8090.
+      # Required on Linux servers (host-gateway); harmless on Docker Desktop.
+      - "host.docker.internal:host-gateway"
+
     volumes:
       # This maps the './data' folder on your host machine
       # to the '/app/data' folder inside the container.

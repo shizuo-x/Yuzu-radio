@@ -54,6 +54,9 @@ LOCAL_AI_MODEL = os.getenv('LOCAL_AI_MODEL', 'local-model')
 
 # --- Radio Station Configuration ---
 POCKETBASE_URL = os.getenv('POCKETBASE_URL')
+# Comma-separated endpoint candidates, tried in order, first healthy wins
+# (e.g. "http://host.docker.internal:8090,http://192.168.1.3:8090,https://pb.example.com")
+POCKETBASE_URLS = os.getenv('POCKETBASE_URLS', '')
 STATIONS_FILE = os.path.join(os.path.dirname(__file__), 'stations.json')
 
 # --- Logging ---
